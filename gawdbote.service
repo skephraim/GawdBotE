@@ -1,0 +1,23 @@
+[Unit]
+Description=GawdBotE — Self-improving AI assistant
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/GawdBotE
+ExecStart=%h/GawdBotE/.venv/bin/python %h/GawdBotE/main.py
+Restart=always
+RestartSec=5
+KillMode=process
+
+Environment=HOME=%h
+Environment=TMPDIR=/tmp
+Environment=PATH=%h/.local/bin:%h/.npm-global/bin:%h/bin:%h/.volta/bin:%h/.local/share/pnpm:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-%h/GawdBotE/.env
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gawdbote
+
+[Install]
+WantedBy=default.target

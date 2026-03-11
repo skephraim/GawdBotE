@@ -33,7 +33,10 @@ gawdbote/
 ├── backups/            # Archives from `python main.py backup create`
 ├── config.py           # All settings from .env
 ├── main.py             # Entry point — starts all interfaces concurrently
-└── requirements.txt
+├── requirements.txt
+├── install.sh          # One-shot installer: venv + systemd service + gawdbote CLI
+├── gawdbote.service    # systemd unit template (install.sh copies to ~/.config/systemd/user/)
+└── Makefile            # make setup/start/stop/restart/status/logs/chat/doctor/backup
 ```
 
 ## Key Design Decisions
