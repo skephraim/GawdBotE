@@ -25,7 +25,7 @@ def speak(text: str) -> None:
     model = config.PIPER_MODEL
     if not Path(model).exists():
         log.warning("Piper model not found: %s — skipping TTS", model)
-        print(f"[SuperAI] {text}")
+        print(f"[GawdBotE] {text}")
         return
     try:
         proc = subprocess.Popen(
@@ -44,10 +44,10 @@ def speak(text: str) -> None:
         play.communicate(input=raw)
     except FileNotFoundError:
         log.warning("piper or aplay not found — printing response instead")
-        print(f"[SuperAI] {text}")
+        print(f"[GawdBotE] {text}")
     except Exception as e:
         log.error("TTS error: %s", e)
-        print(f"[SuperAI] {text}")
+        print(f"[GawdBotE] {text}")
 
 
 # ── Speech-to-Text ─────────────────────────────────────────────────────────────

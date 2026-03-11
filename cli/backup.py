@@ -1,5 +1,5 @@
 """
-SuperAI backup — create and verify local state archives.
+GawdBotE backup — create and verify local state archives.
 Inspired by OpenClaw's `openclaw backup` command.
 Usage:
   python -m cli.backup create [--no-data]
@@ -31,7 +31,7 @@ def create(include_data: bool = True) -> Path:
     """Create a .tar.gz backup of the project."""
     BACKUP_DIR.mkdir(exist_ok=True)
     ts = time.strftime("%Y%m%d-%H%M%S")
-    archive_path = BACKUP_DIR / f"superai-backup-{ts}.tar.gz"
+    archive_path = BACKUP_DIR / f"gawdbote-backup-{ts}.tar.gz"
 
     exclude = {".git", "__pycache__", "backups", ".venv", "venv", "node_modules"}
     if not include_data:
@@ -53,7 +53,7 @@ def create(include_data: bool = True) -> Path:
         # Embed manifest
         import io
         manifest_bytes = json.dumps(manifest, indent=2).encode()
-        info = tarfile.TarInfo(name=".superai-manifest.json")
+        info = tarfile.TarInfo(name=".gawdbote-manifest.json")
         info.size = len(manifest_bytes)
         tar.addfile(info, io.BytesIO(manifest_bytes))
 
@@ -72,7 +72,7 @@ def verify(archive_path: str) -> bool:
 
     with tarfile.open(path, "r:gz") as tar:
         try:
-            manifest_file = tar.extractfile(".superai-manifest.json")
+            manifest_file = tar.extractfile(".gawdbote-manifest.json")
             manifest = json.loads(manifest_file.read())
         except KeyError:
             print("No manifest found in archive — cannot verify")

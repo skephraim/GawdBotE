@@ -34,7 +34,7 @@ async def run() -> None:
         return secret == config.WEBHOOK_SECRET
 
     async def health(request):
-        return web.json_response({"status": "ok", "service": "superai"})
+        return web.json_response({"status": "ok", "service": "gawdbote"})
 
     async def webhook(request):
         if not _auth(request):

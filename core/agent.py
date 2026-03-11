@@ -1,5 +1,5 @@
 """
-SuperAI core agent — agentic loop with tool calling.
+GawdBotE core agent — agentic loop with tool calling.
 Receives messages from any interface (voice, Telegram, Discord, Slack, webhooks)
 and returns a response string.
 """
@@ -14,7 +14,7 @@ from tools import git_tools, code_tools, pc_control, web_search
 
 log = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are SuperAI — a powerful, self-improving AI assistant with full system access.
+SYSTEM_PROMPT = """You are GawdBotE — a powerful, self-improving AI assistant with full system access.
 
 Capabilities:
 - Files & shell: read/write files, run commands, edit code

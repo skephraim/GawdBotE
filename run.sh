@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SuperAI quick-start script
+# GawdBotE quick-start script
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -13,7 +13,7 @@ CMD="${1:-run}"
 
 case "$CMD" in
   install)
-    echo "Setting up SuperAI..."
+    echo "Setting up GawdBotE..."
     python3 -m venv "$VENV"
     "$VENV/bin/pip" install --upgrade pip -q
     "$VENV/bin/pip" install -r requirements.txt
@@ -53,5 +53,5 @@ if [ ! -f "$SCRIPT_DIR/.env" ]; then
   exit 1
 fi
 
-echo "Starting SuperAI..."
+echo "Starting GawdBotE..."
 exec "$PYTHON" main.py

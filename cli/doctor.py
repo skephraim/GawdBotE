@@ -1,5 +1,5 @@
 """
-SuperAI doctor — health checks for all subsystems.
+GawdBotE doctor — health checks for all subsystems.
 Inspired by OpenClaw's `openclaw doctor` command.
 Usage: python -m cli.doctor [--fix]
 """
@@ -161,7 +161,7 @@ def _pkg(module: str, pip_name: str = None) -> tuple:
 
 
 def main(fix: bool = False) -> None:
-    print("\nSuperAI Doctor\n" + "=" * 40)
+    print("\nGawdBotE Doctor\n" + "=" * 40)
     all_ok = True
     for name, fn in CHECKS:
         try:

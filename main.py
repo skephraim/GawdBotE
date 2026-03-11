@@ -1,5 +1,5 @@
 """
-SuperAI — entry point.
+GawdBotE — entry point.
 Starts all enabled interfaces concurrently:
   - Telegram bot
   - Discord bot
@@ -18,11 +18,11 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%H:%M:%S",
 )
-log = logging.getLogger("superai")
+log = logging.getLogger("gawdbote")
 
 
 async def main() -> None:
-    log.info("SuperAI starting up…")
+    log.info("GawdBotE starting up…")
 
     import config
     from interfaces import telegram_bot, discord_bot, slack_bot, webhook_server
@@ -70,7 +70,7 @@ async def main() -> None:
         log.info("Run: python -m cli.doctor to diagnose")
         return
 
-    log.info("SuperAI running with %d active interface(s). Press Ctrl+C to stop.", len(tasks))
+    log.info("GawdBotE running with %d active interface(s). Press Ctrl+C to stop.", len(tasks))
 
     try:
         await asyncio.gather(*tasks)
@@ -79,7 +79,7 @@ async def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        log.info("SuperAI shutting down…")
+        log.info("GawdBotE shutting down…")
         for t in tasks:
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -107,7 +107,7 @@ if __name__ == "__main__":
             # Interactive CLI chat
             async def cli_chat():
                 from core import agent
-                print("SuperAI interactive chat (Ctrl+C to exit)\n")
+                print("GawdBotE interactive chat (Ctrl+C to exit)\n")
                 history = []
                 while True:
                     try:
@@ -118,7 +118,7 @@ if __name__ == "__main__":
                     if not user_input:
                         continue
                     response = await agent.run(user_input, history=history, source="cli")
-                    print(f"SuperAI: {response}\n")
+                    print(f"GawdBotE: {response}\n")
                     history.append({"role": "user", "content": user_input})
                     history.append({"role": "assistant", "content": response})
             asyncio.run(cli_chat())

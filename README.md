@@ -1,11 +1,11 @@
-# SuperAI
+# GawdBotE
 
 A self-improving AI assistant combining the best of GawdBot and OpenClaw.
 
 ```
 Voice (wake word) ─┐
 Telegram           │
-Discord            ├──► SuperAI Agent ──► Memory (SQLite + embeddings)
+Discord            ├──► GawdBotE Agent ──► Memory (SQLite + embeddings)
 Slack              │         │
 Webhooks (HTTP)    ┘         ├──► Files / Git / GitHub PRs
                              ├──► PC control (mouse, keyboard, windows)
@@ -38,8 +38,8 @@ Webhooks (HTTP)    ┘         ├──► Files / Git / GitHub PRs
 
 ```bash
 # 1. Clone and install
-git clone https://github.com/skephraim/superai
-cd superai
+git clone https://github.com/skephraim/GawdBotE
+cd gawdbote
 ./run.sh install
 
 # 2. Configure

@@ -31,7 +31,7 @@ async def run() -> None:
 
     async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(
-            "SuperAI online. I have full system access, voice control, web search, and self-improvement.\n"
+            "GawdBotE online. I have full system access, voice control, web search, and self-improvement.\n"
             "Use /help to see commands."
         )
 
@@ -40,7 +40,7 @@ async def run() -> None:
             "/evolve <request> — trigger self-improvement\n"
             "/memory <query> — search persistent memory\n"
             "/search <query> — web search\n"
-            "Any message — chat with SuperAI\n"
+            "Any message — chat with GawdBotE\n"
             "Voice message — transcribed and handled as text"
         )
 

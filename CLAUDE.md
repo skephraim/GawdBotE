@@ -1,12 +1,12 @@
-# SuperAI Architecture
+# GawdBotE Architecture
 
-SuperAI is a self-improving AI assistant combining the best of GawdBot and OpenClaw.
+GawdBotE is a self-improving AI assistant combining the best of GawdBot and OpenClaw.
 This file is read by the agent before any self-evolution task.
 
 ## Directory Layout
 
 ```
-superai/
+gawdbote/
 ├── core/
 │   ├── agent.py        # Agentic loop — dispatches tool calls, calls LLM
 │   ├── llm.py          # Multi-provider LLM with automatic fallback

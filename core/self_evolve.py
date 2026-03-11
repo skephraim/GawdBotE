@@ -1,5 +1,5 @@
 """
-Self-evolution: SuperAI edits its own source code.
+Self-evolution: GawdBotE edits its own source code.
 Workflow:
   1. Read CLAUDE.md for architecture context
   2. Agent edits source files based on the improvement request
@@ -16,8 +16,8 @@ from tools import git_tools, code_tools
 
 log = logging.getLogger(__name__)
 
-EVOLVE_SYSTEM = """You are the self-evolution subsystem of SuperAI.
-Your job is to improve the SuperAI codebase based on the user's request.
+EVOLVE_SYSTEM = """You are the self-evolution subsystem of GawdBotE.
+Your job is to improve the GawdBotE codebase based on the user's request.
 
 Steps you MUST follow:
 1. Read CLAUDE.md (call read_file("CLAUDE.md")) to understand the architecture.

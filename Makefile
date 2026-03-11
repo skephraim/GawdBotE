@@ -6,7 +6,7 @@ PIP := $(VENV)/bin/pip
 BIN := $(VENV)/bin/python
 
 help:
-	@echo "SuperAI — make targets:"
+	@echo "GawdBotE — make targets:"
 	@echo "  make install        Set up virtualenv and install dependencies"
 	@echo "  make run            Start all interfaces (Telegram, Discord, Slack, webhooks, voice, cron)"
 	@echo "  make chat           Interactive CLI chat"

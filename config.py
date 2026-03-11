@@ -1,5 +1,5 @@
 """
-SuperAI — unified configuration.
+GawdBotE — unified configuration.
 All settings come from environment variables / .env file.
 """
 from __future__ import annotations
@@ -83,7 +83,7 @@ PC_CONTROL_ENABLED = os.getenv("PC_CONTROL_ENABLED", "true").lower() == "true"
 
 # ── Self-evolution ─────────────────────────────────────────────────────────────
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
-GITHUB_REPO = os.getenv("GITHUB_REPO", "")   # e.g. "user/superai"
+GITHUB_REPO = os.getenv("GITHUB_REPO", "")   # e.g. "user/gawdbote"
 SELF_EVOLVE_BRANCH_PREFIX = os.getenv("SELF_EVOLVE_BRANCH_PREFIX", "evolve")
 SELF_EVOLVE_AUTO_MERGE = os.getenv("SELF_EVOLVE_AUTO_MERGE", "false").lower() == "true"
 
