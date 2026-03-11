@@ -36,29 +36,25 @@ Webhooks (HTTP)    ┘         ├──► Files / Git / GitHub PRs
 
 ## Quick Start
 
+See **[QUICKSTART.md](QUICKSTART.md)** for the full step-by-step installation guide.
+
 ```bash
 # 1. Clone and install
 git clone https://github.com/skephraim/GawdBotE
-cd gawdbote
-./run.sh install
+cd GawdBotE
+./install.sh
 
 # 2. Configure
 cp .env.example .env
 nano .env   # fill in your API keys
 
-# 3. Run
-./run.sh          # start all interfaces
-./run.sh chat     # interactive CLI chat
-./run.sh doctor   # check all subsystems
-```
+# 3. Health check
+gawdbote doctor
 
-Or with Make:
-
-```bash
-make install
-make run
-make chat
-make doctor
+# 4. Run
+gawdbote chat     # interactive CLI session
+gawdbote start    # start as a background service
+gawdbote logs     # watch live output
 ```
 
 ## LLM Providers (Auto-Fallback)
