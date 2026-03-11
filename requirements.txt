@@ -1,0 +1,30 @@
+# ── Core ──────────────────────────────────────────────────────────────────────
+python-dotenv>=1.0
+openai>=1.30            # OpenAI-compat client (NVIDIA NIM, Ollama, OpenAI, OpenRouter)
+aiohttp>=3.9            # Async HTTP (webhooks, web search, GitHub API)
+
+# ── LLM providers (install what you use) ──────────────────────────────────────
+# anthropic>=0.27       # Anthropic Claude — uncomment if using anthropic provider
+
+# ── Interfaces ────────────────────────────────────────────────────────────────
+python-telegram-bot>=21.0   # Telegram
+# discord.py>=2.3       # Discord — uncomment if DISCORD_ENABLED=true
+# slack-bolt>=1.18      # Slack  — uncomment if SLACK_ENABLED=true
+
+# ── Memory / embeddings ───────────────────────────────────────────────────────
+# (SQLite is built-in, no extra DB needed)
+
+# ── Web search ────────────────────────────────────────────────────────────────
+# (DuckDuckGo uses aiohttp — already listed above)
+# If using Brave Search: just set BRAVE_API_KEY, no extra package needed
+
+# ── PC control ────────────────────────────────────────────────────────────────
+pyautogui>=0.9          # Mouse / keyboard control (requires display)
+
+# ── Voice ─────────────────────────────────────────────────────────────────────
+# faster-whisper>=1.0   # Speech-to-text (GPU recommended)
+# openwakeword>=0.6     # Wake word detection
+# pyaudio>=0.2          # Microphone input
+
+# ── Cron scheduler ────────────────────────────────────────────────────────────
+croniter>=2.0           # Cron expression parsing
