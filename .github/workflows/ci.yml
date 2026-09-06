@@ -1,0 +1,64 @@
+# Continuous Integration — runs on every push and pull request.
+#
+# The point: find out in 30 seconds, automatically, instead of finding out in
+# production. Both jobs below exist because a real bug got through without them.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:   # lets you run it by hand from the Actions tab
+
+# A new push to the same branch cancels the previous run, so CI reports on the
+# latest commit instead of queueing up stale ones.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    name: Compile every Python file
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # No dependencies needed: py_compile only parses, it never imports. That
+      # makes this job fast and impossible to break with a bad package pin.
+      - name: Syntax check
+        run: |
+          find . -path ./.git -prune -o -name '*.py' -print \
+            | xargs -r python -m py_compile
+          echo "All Python files compile."
+
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false          # report every version, don't stop at the first red
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      # Deliberately NOT installing requirements.txt. The test suite only
+      # touches config, core/leads.py and tools/keisha.py, and pulling in the
+      # GUI/audio stack (pyautogui and friends) on a headless runner buys
+      # nothing but new ways for CI to fail.
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest -v --tb=short

@@ -28,13 +28,17 @@ gawdbote/
 │   └── webhook_server.py # HTTP API (/webhook, /webhook/embed, /webhook/evolve)
 ├── scheduler/
 │   └── cron.py         # Cron job scheduler (CRON_JOBS env var)
+├── tests/              # pytest suite — `make test` (same checks CI runs)
+├── .github/workflows/
+│   └── ci.yml          # CI: compile every file + run tests on 3.11 and 3.12
 ├── cli/
 │   ├── doctor.py       # Health checks: python main.py doctor
 │   ├── backup.py       # Backup/restore: python main.py backup create
 │   └── keisha.py       # Lead pipeline: python main.py keisha review|approve|send
 ├── data/               # SQLite DBs (memory.db, leads.db) and runtime state (gitignored)
 ├── docs/
-│   └── KEISHA.md       # Keisha guide + Python/SQL/CCL walkthrough
+│   ├── KEISHA.md       # Keisha guide + Python/SQL/CCL walkthrough
+│   └── TESTING.md      # How the tests and CI work
 ├── examples/           # Sample CSVs for `keisha import`
 ├── backups/            # Archives from `python main.py backup create`
 ├── config.py           # All settings from .env
@@ -91,6 +95,9 @@ gawdbote/
 - Always read this file first
 - Change the minimum needed
 - Run `python -m py_compile <file>` before committing
+- Run `make test` before committing — it runs exactly what CI runs
+- Any bug you fix gets a regression test; break the code on purpose to
+  confirm the test actually catches it before you trust it
 - Commit to `evolve-YYYYMMDD-HHMMSS` branch
 - Create a PR — never auto-merge unless SELF_EVOLVE_AUTO_MERGE=true
 - Never modify .env, .git, or data/

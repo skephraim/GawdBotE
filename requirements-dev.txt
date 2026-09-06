@@ -1,0 +1,4 @@
+# Dependencies for running the test suite (CI installs only these).
+# The full runtime lives in requirements.txt.
+pytest>=8.0
+python-dotenv>=1.0      # config.py reads .env through this

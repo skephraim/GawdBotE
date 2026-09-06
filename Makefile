@@ -1,4 +1,4 @@
-.PHONY: install setup run chat doctor backup update-skills start stop restart status logs help
+.PHONY: install setup run chat doctor backup test keisha update-skills start stop restart status logs help
 
 PYTHON ?= python3
 VENV := .venv
@@ -18,6 +18,8 @@ help:
 	@echo "  make chat           Interactive CLI chat"
 	@echo "  make doctor         Run health checks"
 	@echo "  make backup         Create a local backup"
+	@echo "  make test           Run the test suite (same checks as CI)"
+	@echo "  make keisha         Keisha lead pipeline (e.g. make keisha ARGS=report)"
 	@echo "  make update-skills  Update all skills from clawhub"
 
 setup:
@@ -44,6 +46,14 @@ doctor: $(VENV)/bin/activate
 
 backup: $(VENV)/bin/activate
 	$(BIN) main.py backup create
+
+# Runs exactly what CI runs, so a green `make test` means a green PR.
+test: $(VENV)/bin/activate
+	$(PIP) install -q -r requirements-dev.txt
+	$(BIN) -m pytest
+
+keisha: $(VENV)/bin/activate
+	$(BIN) main.py keisha $(ARGS)
 
 start:
 	systemctl --user start gawdbote.service && echo "GawdBotE started."
