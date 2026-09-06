@@ -91,3 +91,43 @@ SELF_EVOLVE_AUTO_MERGE = os.getenv("SELF_EVOLVE_AUTO_MERGE", "false").lower() ==
 CRON_ENABLED = os.getenv("CRON_ENABLED", "true").lower() == "true"
 # JSON list of {"schedule": "0 9 * * *", "message": "Good morning! Summarize today's tasks."}
 CRON_JOBS_JSON = os.getenv("CRON_JOBS", "[]")
+
+# ── Keisha (autonomous lead-gen / outreach agent) ──────────────────────────────
+KEISHA_ENABLED = os.getenv("KEISHA_ENABLED", "true").lower() == "true"
+KEISHA_NAME = os.getenv("KEISHA_NAME", "Keisha")
+KEISHA_OWNER = os.getenv("KEISHA_OWNER", "Sun The Great")
+LEADS_DB = os.getenv("LEADS_DB", str(PROJECT_ROOT / "data" / "leads.db"))
+
+# Niches Keisha targets. Comma-separated, lowercase.
+KEISHA_TARGET_NICHES = [
+    n.strip().lower()
+    for n in os.getenv("KEISHA_TARGET_NICHES", "plumbing,hvac,roofing,electrical,landscaping").split(",")
+    if n.strip()
+]
+# A lead must score at least this much to be worth pitching (see tools/keisha.py).
+KEISHA_MIN_SCORE = int(os.getenv("KEISHA_MIN_SCORE", "60"))
+# Strict targeting: when true, a lead with no known missed-call problem (tier B)
+# stops qualifying at all, and only tier A gets pitched.
+KEISHA_REQUIRE_MISSED_CALLS = os.getenv("KEISHA_REQUIRE_MISSED_CALLS", "false").lower() == "true"
+# Hard ceiling on messages actually sent per rolling calendar day.
+KEISHA_DAILY_LIMIT = int(os.getenv("KEISHA_DAILY_LIMIT", "50"))
+
+# How approved messages leave the building.
+#   dry_run = print them, mark them sent, deliver nothing (safe default)
+#   smtp    = really send email via the SMTP_* settings below
+KEISHA_SEND_MODE = os.getenv("KEISHA_SEND_MODE", "dry_run")
+
+# Identity used in the pitch and in the legally-required email footer.
+KEISHA_SENDER_NAME = os.getenv("KEISHA_SENDER_NAME", KEISHA_OWNER)
+KEISHA_SENDER_EMAIL = os.getenv("KEISHA_SENDER_EMAIL", "")
+KEISHA_BUSINESS_NAME = os.getenv("KEISHA_BUSINESS_NAME", "")
+# CAN-SPAM requires a real physical postal address on commercial email.
+KEISHA_MAILING_ADDRESS = os.getenv("KEISHA_MAILING_ADDRESS", "")
+KEISHA_CALENDAR_LINK = os.getenv("KEISHA_CALENDAR_LINK", "")
+
+# SMTP (only used when KEISHA_SEND_MODE=smtp)
+SMTP_HOST = os.getenv("SMTP_HOST", "")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_STARTTLS = os.getenv("SMTP_STARTTLS", "true").lower() == "true"
