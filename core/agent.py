@@ -9,8 +9,8 @@ import logging
 from typing import Optional
 
 import config
-from core import llm, memory, skills as skills_mod
-from tools import git_tools, code_tools, pc_control, web_search
+from core import llm, leads, memory, skills as skills_mod
+from tools import git_tools, code_tools, pc_control, web_search, keisha
 
 log = logging.getLogger(__name__)
 
@@ -24,13 +24,16 @@ Capabilities:
 - Memory: store and recall information persistently
 - Vision: analyze screenshots and images
 - Self-improvement: read and edit your own source code
+- Keisha lead pipeline: qualify leads, draft outreach, manage the approval queue
 
 Guidelines:
 - Be direct and concise in responses
 - Prefer action over lengthy explanation
 - When improving yourself: read CLAUDE.md first, change only what's needed, commit to a branch
 - Ask one clarifying question if the request is genuinely ambiguous
-- Use web search when you need current information you may not have"""
+- Use web search when you need current information you may not have
+- Keisha NEVER sends outreach on her own: drafts go to the approval queue and
+  wait for the owner. Only keisha_send delivers, and only what was approved."""
 
 TOOLS = [
     # ── File / shell ──────────────────────────────────────────────────────────
@@ -365,6 +368,172 @@ TOOLS = [
             },
         },
     },
+    # ── Keisha: lead pipeline ─────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "keisha_add_lead",
+            "description": "Add a business lead to Keisha's pipeline and score it immediately",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "business_name": {"type": "string"},
+                    "contact_name": {"type": "string"},
+                    "email": {"type": "string"},
+                    "phone": {"type": "string"},
+                    "website": {"type": "string", "description": "Leave empty if they have no website"},
+                    "niche": {"type": "string", "description": "e.g. plumbing, hvac, roofing"},
+                    "city": {"type": "string"},
+                    "notes": {"type": "string"},
+                    "missed_calls": {"type": "boolean", "description": "Known missed-call problem"},
+                },
+                "required": ["business_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "keisha_import_csv",
+            "description": "Bulk-import leads from a CSV file and score them all",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "default_niche": {"type": "string", "description": "Niche for rows that don't state one"},
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "keisha_list_leads",
+            "description": "List leads in the pipeline, optionally filtered by status or niche",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "description": "new|qualified|rejected|queued|contacted|replied|won|lost|do_not_contact"},
+                    "niche": {"type": "string"},
+                    "limit": {"type": "integer", "default": 25},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "keisha_qualify",
+            "description": "Re-score one lead and explain every point of the score",
+            "parameters": {
+                "type": "object",
+                "properties": {"lead_id": {"type": "integer"}},
+                "required": ["lead_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "keisha_draft",
+            "description": "Draft an outreach message for one lead into the pending approval queue. Does not send.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "lead_id": {"type": "integer"},
+                    "channel": {"type": "string", "enum": ["email", "sms"], "default": "email"},
+                },
+                "required": ["lead_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "keisha_run_pipeline",
+            "description": "Score all new leads and draft messages for the qualified ones. Everything lands pending approval; nothing is sent.",
+            "parameters": {
+                "type": "object",
+                "properties": {"limit": {"type": "integer", "default": 20}},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "keisha_review",
+            "description": "Show the outreach messages waiting for the owner's approval",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "default": 10},
+                    "status": {"type": "string", "default": "pending"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "keisha_approve",
+            "description": "Approve one queued message for sending. Only the owner may authorize this.",
+            "parameters": {
+                "type": "object",
+                "properties": {"outbox_id": {"type": "integer"}},
+                "required": ["outbox_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "keisha_reject",
+            "description": "Reject a queued message and return the lead to the qualified pool",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "outbox_id": {"type": "integer"},
+                    "note": {"type": "string"},
+                },
+                "required": ["outbox_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "keisha_send",
+            "description": "Send messages the owner already approved, respecting the daily limit and suppression list. Never sends anything still pending.",
+            "parameters": {
+                "type": "object",
+                "properties": {"limit": {"type": "integer", "default": 25}},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "keisha_block",
+            "description": "Add an email address or domain to the permanent do-not-contact list",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "value": {"type": "string"},
+                    "reason": {"type": "string"},
+                },
+                "required": ["value"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "keisha_report",
+            "description": "Snapshot of the whole lead pipeline: counts by status, sent today, targeting",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
 ]
 
 
@@ -436,6 +605,39 @@ async def _dispatch(name: str, args: dict) -> str:
         return skills_mod.install_skill(args["name"], args.get("version", ""))
     if name == "skill_update":
         return skills_mod.update_skill(args.get("name", ""), args.get("force", False))
+
+    if name == "keisha_add_lead":
+        return keisha.add_lead(**args)
+    if name == "keisha_import_csv":
+        return keisha.import_csv(args["path"], args.get("default_niche", ""))
+    if name == "keisha_list_leads":
+        rows = leads.find_leads(status=args.get("status"), niche=args.get("niche"),
+                                limit=args.get("limit", 25))
+        if not rows:
+            return "No leads match."
+        return "\n".join(
+            f"#{r['id']} [{r['status']} {r['score']}] {r['business_name']} "
+            f"({r['niche'] or '?'}, {r['city'] or '?'}) {r['email'] or r['phone']}"
+            for r in rows
+        )
+    if name == "keisha_qualify":
+        return keisha.qualify(args["lead_id"])
+    if name == "keisha_draft":
+        return await keisha.draft(args["lead_id"], args.get("channel", "email"))
+    if name == "keisha_run_pipeline":
+        return await keisha.run_pipeline(limit=args.get("limit", 20))
+    if name == "keisha_review":
+        return keisha.review(limit=args.get("limit", 10), status=args.get("status", "pending"))
+    if name == "keisha_approve":
+        return keisha.approve(args["outbox_id"])
+    if name == "keisha_reject":
+        return keisha.reject(args["outbox_id"], args.get("note", ""))
+    if name == "keisha_send":
+        return await keisha.send_approved(limit=args.get("limit", 25))
+    if name == "keisha_block":
+        return keisha.do_not_contact(args["value"], args.get("reason", "requested"))
+    if name == "keisha_report":
+        return keisha.report()
 
     return f"Unknown tool: {name}"
 

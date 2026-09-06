@@ -103,6 +103,9 @@ if __name__ == "__main__":
         elif cmd == "backup":
             from cli.backup import main as backup_main
             backup_main()
+        elif cmd == "keisha":
+            from cli.keisha import main as keisha_main
+            keisha_main(sys.argv[2:])
         elif cmd == "chat":
             # Interactive CLI chat
             async def cli_chat():
@@ -124,6 +127,6 @@ if __name__ == "__main__":
             asyncio.run(cli_chat())
         else:
             print(f"Unknown command: {cmd}")
-            print("Commands: doctor, backup, chat")
+            print("Commands: doctor, backup, chat, keisha")
     else:
         asyncio.run(main())
