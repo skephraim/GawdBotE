@@ -10,7 +10,7 @@ Slack              │         │
 Webhooks (HTTP)    ┘         ├──► Files / Git / GitHub PRs
                              ├──► PC control (mouse, keyboard, windows)
                              ├──► Web search (DuckDuckGo / Brave)
-                             ├──► Skills (52 built-in, install more via clawhub)
+                             ├──► Skills (53 built-in, install more via clawhub)
                              └──► Self-improvement (reads + edits own code)
 ```
 
@@ -26,7 +26,7 @@ Webhooks (HTTP)    ┘         ├──► Files / Git / GitHub PRs
 | Text embeddings | NVIDIA NIM, Ollama, or OpenAI |
 | Persistent memory | SQLite + cosine similarity search |
 | Web search | DuckDuckGo (free) or Brave Search API |
-| Skills | 52 built-in; install more via `clawhub install <skill>` |
+| Skills | 53 built-in; install more via `clawhub install <skill>` |
 | Coding agent | Read/write files, run commands, git commit, create GitHub PRs |
 | PC control | Mouse, keyboard, hotkeys, windows, clipboard, screenshots |
 | Webhooks | POST `/webhook` to trigger agent |
