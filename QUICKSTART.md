@@ -270,6 +270,23 @@ The agent will wake up on schedule and run those prompts automatically.
 
 ---
 
+## Optional: Build Agents/Skills From YouTube Tutorials
+
+Teach Claude Code to actually watch YouTube tutorials — transcript for what
+was said, Gemini for what was shown but never explained — then turn the
+consensus across 10 tutorials into a tested skill file.
+
+```bash
+./scripts/setup_youtube_mcp.sh
+```
+
+It clones and builds the two MCP servers this needs and registers them with
+Claude Code (asks for a free Gemini key; a YouTube Data API v3 key is
+optional). Full walkthrough and reusable prompts:
+[`skills/youtube-agent-builder/SKILL.md`](skills/youtube-agent-builder/SKILL.md).
+
+---
+
 ## Optional: Enable Self-Evolution (Agent Edits Its Own Code)
 
 This lets GawdBotE open GitHub pull requests to improve itself.
