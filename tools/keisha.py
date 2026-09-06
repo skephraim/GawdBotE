@@ -17,7 +17,9 @@ from __future__ import annotations
 import asyncio
 import csv
 import logging
+import re
 import time
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -36,6 +38,12 @@ W_MISSED_CALLS = 15   # stated pain: phone rings, nobody answers
 W_REACHABLE    = 10   # you have an email or a phone number to use
 
 MAX_SCORE = W_TARGET_NICHE + W_NO_WEBSITE + W_MISSED_CALLS + W_REACHABLE
+
+# ── Tiers ─────────────────────────────────────────────────────────────────────
+# Qualified leads split in two. They sort alphabetically, which is why "A" and
+# "B" rather than "hot"/"warm" — the database orders them correctly for free.
+TIER_HOT = "A"    # qualified AND has a known missed-call problem — work these first
+TIER_WARM = "B"   # qualified on niche + no website alone — work these next
 
 
 # ── Small helpers ─────────────────────────────────────────────────────────────
@@ -89,6 +97,7 @@ def score_lead(lead: dict) -> dict:
     """
     reasons: list[str] = []
     score = 0
+    tier = ""
 
     niche = (lead.get("niche") or "").strip().lower()
     website = (lead.get("website") or "").strip()
@@ -99,11 +108,11 @@ def score_lead(lead: dict) -> dict:
     # Hard blockers: these override the score entirely. No number is high
     # enough to justify contacting someone who asked not to be contacted.
     if lead.get("status") == "do_not_contact":
-        return {"score": 0, "qualified": False, "reasons": ["Marked do-not-contact."],
-                "blocked": "do_not_contact"}
+        return {"score": 0, "qualified": False, "tier": "",
+                "reasons": ["Marked do-not-contact."], "blocked": "do_not_contact"}
     if email and leads.is_suppressed(email):
-        return {"score": 0, "qualified": False, "reasons": ["Address is on the suppression list."],
-                "blocked": "suppressed"}
+        return {"score": 0, "qualified": False, "tier": "",
+                "reasons": ["Address is on the suppression list."], "blocked": "suppressed"}
 
     if niche and niche in config.KEISHA_TARGET_NICHES:
         score += W_TARGET_NICHE
@@ -128,7 +137,26 @@ def score_lead(lead: dict) -> dict:
         reasons.append("+0 no email and no phone — you cannot reach them")
 
     qualified = score >= config.KEISHA_MIN_SCORE and bool(email or phone)
-    return {"score": score, "qualified": qualified, "reasons": reasons, "blocked": None}
+
+    # ── Tiering ───────────────────────────────────────────────────────────────
+    # Both signals count, but they don't count the same. A shop in your trade
+    # with no website is worth pitching (Tier B). One that ALSO has a known
+    # missed-call problem is worth pitching first (Tier A), because you can
+    # point at a problem they already know they have instead of a hypothetical.
+    #
+    # Work A before B. B is your backlog, not your trash.
+    if qualified:
+        tier = TIER_HOT if missed_calls else TIER_WARM
+
+    # Strict mode: if you'd rather never pitch on a guess, set
+    # KEISHA_REQUIRE_MISSED_CALLS=true and Tier B stops qualifying at all.
+    if config.KEISHA_REQUIRE_MISSED_CALLS and tier == TIER_WARM:
+        qualified = False
+        tier = ""
+        reasons.append("PASS: strict mode is on and there's no missed-call evidence")
+
+    return {"score": score, "qualified": qualified, "tier": tier,
+            "reasons": reasons, "blocked": None}
 
 
 def qualify(lead_id: int) -> str:
@@ -143,9 +171,10 @@ def qualify(lead_id: int) -> str:
         status = "do_not_contact"
 
     reason = "; ".join(verdict["reasons"])
-    leads.set_lead_status(lead_id, status, score=verdict["score"], reason=reason)
+    leads.set_lead_status(lead_id, status, score=verdict["score"],
+                          reason=reason, tier=verdict["tier"])
 
-    headline = "QUALIFIED" if verdict["qualified"] else "PASS"
+    headline = f"TIER {verdict['tier']}" if verdict["qualified"] else "PASS"
     return (
         f"#{lead_id} {lead['business_name']} — {headline} "
         f"({verdict['score']}/{MAX_SCORE}, threshold {config.KEISHA_MIN_SCORE})\n  "
@@ -168,13 +197,10 @@ def add_lead(
     source: str = "manual",
 ) -> str:
     """Add (or merge) a single lead, then immediately score it."""
-    if missed_calls and "missed call" not in notes.lower():
-        notes = (notes + " | missed-call issue reported").strip(" |")
-
     lead_id, created = leads.upsert_lead(
         business_name=business_name, contact_name=contact_name, email=email,
         phone=phone, website=website, niche=niche.strip().lower(),
-        city=city, notes=notes, source=source,
+        city=city, notes=notes, missed_calls=missed_calls, source=source,
     )
     verb = "Added" if created else "Updated existing"
     return f"{verb} lead #{lead_id}.\n" + qualify(lead_id)
@@ -183,6 +209,17 @@ def add_lead(
 # Column names we accept in an imported CSV, mapped to our own field names.
 # Left side is what people actually name their spreadsheet columns; right side
 # is what the database calls it.
+def _norm_header(key: str) -> str:
+    """
+    'Missed Call Issue' → 'missed_call_issue'.
+
+    Real spreadsheets use spaces, hyphens, and Title Case in their headers.
+    Squashing all of that to one shape means the alias table below only has to
+    list each concept once instead of every way a person might capitalize it.
+    """
+    return re.sub(r"[\s\-]+", "_", key.strip().lower()).strip("_")
+
+
 _CSV_ALIASES = {
     "business": "business_name", "business_name": "business_name", "company": "business_name",
     "name": "business_name", "contact": "contact_name", "contact_name": "contact_name",
@@ -193,7 +230,9 @@ _CSV_ALIASES = {
     "niche": "niche", "industry": "niche", "category": "niche", "trade": "niche",
     "city": "city", "town": "city", "location": "city",
     "notes": "notes", "note": "notes",
-    "missed_calls": "missed_calls", "missed_call_issue": "missed_calls",
+    "missed_calls": "missed_calls", "missed_call": "missed_calls",
+    "missed_call_issue": "missed_calls", "missed_calls_issue": "missed_calls",
+    "has_missed_call_issue": "missed_calls",
 }
 
 
@@ -220,7 +259,7 @@ def import_csv(path: str, default_niche: str = "") -> str:
             for key, value in raw.items():
                 if key is None:
                     continue
-                field = _CSV_ALIASES.get(key.strip().lower())
+                field = _CSV_ALIASES.get(_norm_header(key))
                 if field:
                     row[field] = (value or "").strip()
 
@@ -229,6 +268,7 @@ def import_csv(path: str, default_niche: str = "") -> str:
                 continue
 
             niche = (row.get("niche") or default_niche).strip().lower()
+            missed = _truthy(row.get("missed_calls", ""))
             lead_id, created = leads.upsert_lead(
                 business_name=row["business_name"],
                 contact_name=row.get("contact_name", ""),
@@ -238,6 +278,7 @@ def import_csv(path: str, default_niche: str = "") -> str:
                 niche=niche,
                 city=row.get("city", ""),
                 notes=row.get("notes", ""),
+                missed_calls=missed,
                 source=f"csv:{p.name}",
             )
             if created:
@@ -245,19 +286,21 @@ def import_csv(path: str, default_niche: str = "") -> str:
             else:
                 updated += 1
 
-            # Carry the missed-call flag through to scoring for this row.
-            stored = leads.get_lead(lead_id) or {}
-            stored["missed_calls"] = row.get("missed_calls", "")
-            verdict = score_lead(stored)
+            # Re-read the stored row so scoring sees exactly what the database
+            # holds — including a sticky missed-call flag from an earlier import.
+            verdict = score_lead(leads.get_lead(lead_id) or {})
             status = "do_not_contact" if verdict["blocked"] else (
                 "qualified" if verdict["qualified"] else "rejected")
             leads.set_lead_status(lead_id, status, score=verdict["score"],
-                                  reason="; ".join(verdict["reasons"]))
+                                  reason="; ".join(verdict["reasons"]),
+                                  tier=verdict["tier"])
             if verdict["qualified"]:
-                results.append(f"  #{lead_id} {row['business_name']} — {verdict['score']}/{MAX_SCORE}")
+                results.append(f"  [{verdict['tier']}] #{lead_id} {row['business_name']} "
+                               f"— {verdict['score']}/{MAX_SCORE}")
 
+    results.sort()   # "  [A] …" sorts before "  [B] …"
     summary = (f"Imported {p.name}: {added} new, {updated} updated, {skipped} skipped.\n"
-               f"{len(results)} qualified:")
+               f"{len(results)} qualified (A = missed-call evidence, B = niche + no website):")
     return summary + ("\n" + "\n".join(results[:25]) if results else " none.")
 
 
@@ -393,7 +436,8 @@ async def draft(lead_id: int, channel: str = "email", use_llm: bool = True) -> s
             f"(PENDING — nothing sent. Approve with: keisha approve {outbox_id})")
 
 
-async def run_pipeline(limit: int = 20, use_llm: bool = True) -> str:
+async def run_pipeline(limit: int = 20, use_llm: bool = True,
+                       tier: Optional[str] = None) -> str:
     """
     The one-command daily run: score every untouched lead, then draft for
     everyone who passes. Still ends with a queue full of pending drafts and
@@ -403,10 +447,16 @@ async def run_pipeline(limit: int = 20, use_llm: bool = True) -> str:
     for lead in fresh:
         qualify(lead["id"])
 
-    ready = leads.find_leads(status="qualified", limit=limit)
+    # find_leads already orders Tier A ahead of Tier B, so slicing to `limit`
+    # spends your daily budget on the hottest leads rather than whichever ones
+    # happened to be imported first.
+    ready = leads.find_leads(status="qualified", tier=tier, limit=limit)
     if not ready:
-        return ("Pipeline run complete. No qualified leads waiting.\n"
+        scope = f" in tier {tier}" if tier else ""
+        return (f"Pipeline run complete. No qualified leads waiting{scope}.\n"
                 f"(Scored {len(fresh)} new lead(s).)")
+
+    counts = Counter(l["tier"] for l in ready)
 
     # Drafts are independent of each other, so write them concurrently rather
     # than waiting on each LLM call in turn.
@@ -415,7 +465,8 @@ async def run_pipeline(limit: int = 20, use_llm: bool = True) -> str:
         return_exceptions=True,
     )
     lines = [str(d) if not isinstance(d, Exception) else f"Error: {d}" for d in drafted]
-    return (f"Pipeline run: scored {len(fresh)} new, drafted {len(ready)}.\n"
+    mix = ", ".join(f"{n} tier {t}" for t, n in sorted(counts.items())) or "none"
+    return (f"Pipeline run: scored {len(fresh)} new, drafted {len(ready)} ({mix}).\n"
             f"All PENDING your approval.\n\n" + "\n\n".join(lines))
 
 
@@ -560,8 +611,11 @@ def report() -> str:
         f"Total leads: {s['total_leads']}   Suppressed: {s['suppressed']}\n"
         f"Sent today:  {sent_today}/{config.KEISHA_DAILY_LIMIT}   "
         f"Send mode: {config.KEISHA_SEND_MODE}\n\n"
+        f"{block('Open leads by tier', s['open_by_tier'])}\n"
+        f"  A = missed-call evidence (work first) | B = niche + no website\n\n"
         f"{block('Leads by status', s['leads_by_status'])}\n\n"
         f"{block('Outbox by status', s['outbox_by_status'])}\n\n"
         f"Targeting: {', '.join(config.KEISHA_TARGET_NICHES)} "
-        f"(min score {config.KEISHA_MIN_SCORE}/{MAX_SCORE})"
+        f"(min score {config.KEISHA_MIN_SCORE}/{MAX_SCORE})\n"
+        f"Strict mode: {'ON — tier B does not qualify' if config.KEISHA_REQUIRE_MISSED_CALLS else 'off — tier B still qualifies'}"
     )

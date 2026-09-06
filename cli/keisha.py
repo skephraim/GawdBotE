@@ -43,6 +43,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p_list = sub.add_parser("leads", help="List stored leads")
     p_list.add_argument("--status", default=None)
     p_list.add_argument("--niche", default=None)
+    p_list.add_argument("--tier", default=None, choices=["A", "B"],
+                        help="A = missed-call evidence, B = niche + no website")
     p_list.add_argument("--limit", type=int, default=25)
 
     p_q = sub.add_parser("qualify", help="Re-score one lead")
@@ -54,6 +56,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_run = sub.add_parser("run", help="Score all new leads and draft for the qualified ones")
     p_run.add_argument("--limit", type=int, default=20)
+    p_run.add_argument("--tier", default=None, choices=["A", "B"],
+                       help="Only draft for this tier (default: both, A first)")
     p_run.add_argument("--no-llm", action="store_true")
 
     p_rev = sub.add_parser("review", help="Show messages awaiting your approval")
@@ -102,13 +106,14 @@ def main(argv: list[str] | None = None) -> None:
         ))
 
     elif args.cmd == "leads":
-        rows = leads.find_leads(status=args.status, niche=args.niche, limit=args.limit)
+        rows = leads.find_leads(status=args.status, niche=args.niche,
+                                tier=args.tier, limit=args.limit)
         if not rows:
             print("No leads match.")
             return
-        print(f"{'ID':<5}{'SCORE':<7}{'STATUS':<12}{'NICHE':<12}BUSINESS")
+        print(f"{'ID':<5}{'TIER':<6}{'SCORE':<7}{'STATUS':<12}{'NICHE':<12}BUSINESS")
         for r in rows:
-            print(f"{r['id']:<5}{r['score']:<7}{r['status']:<12}"
+            print(f"{r['id']:<5}{(r['tier'] or '-'):<6}{r['score']:<7}{r['status']:<12}"
                   f"{(r['niche'] or '-'):<12}{r['business_name']}")
 
     elif args.cmd == "qualify":
@@ -118,7 +123,8 @@ def main(argv: list[str] | None = None) -> None:
         print(asyncio.run(keisha.draft(args.lead_id, use_llm=not args.no_llm)))
 
     elif args.cmd == "run":
-        print(asyncio.run(keisha.run_pipeline(limit=args.limit, use_llm=not args.no_llm)))
+        print(asyncio.run(keisha.run_pipeline(limit=args.limit, tier=args.tier,
+                                              use_llm=not args.no_llm)))
 
     elif args.cmd == "review":
         print(keisha.review(limit=args.limit, status=args.status))

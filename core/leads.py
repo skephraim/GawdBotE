@@ -38,9 +38,11 @@ CREATE TABLE IF NOT EXISTS leads (
     niche         TEXT    NOT NULL DEFAULT '',
     city          TEXT    NOT NULL DEFAULT '',
     notes         TEXT    NOT NULL DEFAULT '',
+    missed_calls  INTEGER NOT NULL DEFAULT 0,
     source        TEXT    NOT NULL DEFAULT 'manual',
     status        TEXT    NOT NULL DEFAULT 'new',
     score         INTEGER NOT NULL DEFAULT 0,
+    tier          TEXT    NOT NULL DEFAULT '',
     reason        TEXT    NOT NULL DEFAULT '',
     created_ts    REAL    NOT NULL,
     updated_ts    REAL    NOT NULL
@@ -67,8 +69,16 @@ CREATE TABLE IF NOT EXISTS suppression (
     created_ts REAL NOT NULL
 );
 
+"""
+
+# Indexes live apart from the table DDL because they must be created *after*
+# _migrate() has added any missing columns. An index on a column the table
+# doesn't have yet fails outright — which is exactly what happens when an
+# older database meets a newer index.
+_INDEXES = """
 CREATE INDEX IF NOT EXISTS idx_leads_status  ON leads (status);
 CREATE INDEX IF NOT EXISTS idx_leads_niche   ON leads (niche);
+CREATE INDEX IF NOT EXISTS idx_leads_tier    ON leads (tier);
 CREATE INDEX IF NOT EXISTS idx_outbox_status ON outbox (status);
 CREATE INDEX IF NOT EXISTS idx_outbox_lead   ON outbox (lead_id);
 """
@@ -83,6 +93,27 @@ LEAD_STATUSES = (
 OUTBOX_STATUSES = ("pending", "approved", "rejected", "sent", "failed")
 
 
+# Columns added after the first release. CREATE TABLE IF NOT EXISTS will not
+# touch a table that already exists, so a database created before these columns
+# existed needs them added by hand — that is what a migration is.
+_MIGRATIONS = {
+    "leads": {
+        "tier": "TEXT NOT NULL DEFAULT ''",
+        "missed_calls": "INTEGER NOT NULL DEFAULT 0",
+    },
+}
+
+
+def _migrate(c: sqlite3.Connection) -> None:
+    """Add any column listed in _MIGRATIONS that this database is missing."""
+    for table, columns in _MIGRATIONS.items():
+        # PRAGMA table_info asks SQLite to describe a table's own columns.
+        have = {r["name"] for r in c.execute(f"PRAGMA table_info({table})").fetchall()}
+        for name, decl in columns.items():
+            if name not in have:
+                c.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
+
 @contextmanager
 def _conn() -> Iterator[sqlite3.Connection]:
     """Open a connection, guarantee the schema, commit on success, always close."""
@@ -90,7 +121,9 @@ def _conn() -> Iterator[sqlite3.Connection]:
     c.row_factory = sqlite3.Row          # rows behave like dicts: row["email"]
     c.execute("PRAGMA foreign_keys = ON")  # off by default in SQLite
     try:
-        c.executescript(_SCHEMA)
+        c.executescript(_SCHEMA)    # 1. tables exist
+        _migrate(c)                 # 2. old tables gain any new columns
+        c.executescript(_INDEXES)   # 3. only now is it safe to index them
         yield c
         c.commit()
     finally:
@@ -133,6 +166,7 @@ def upsert_lead(
     niche: str = "",
     city: str = "",
     notes: str = "",
+    missed_calls: bool = False,
     source: str = "manual",
 ) -> tuple[int, bool]:
     """
@@ -146,6 +180,10 @@ def upsert_lead(
     with _conn() as db:
         existing = db.execute("SELECT id FROM leads WHERE dedupe_key = ?", (key,)).fetchone()
         if existing:
+            # missed_calls uses MAX(old, new) so the flag is sticky: once you
+            # learn a shop has a missed-call problem, a later import that
+            # simply doesn't mention it cannot unlearn the fact.
+            #
             # business_name is deliberately NOT updated: the first spelling we
             # stored is usually the clean one, and a later duplicate row like
             # "APEX  Plumbing LLC." should not overwrite "Apex Plumbing".
@@ -163,22 +201,24 @@ def upsert_lead(
                     niche         = COALESCE(NULLIF(?, ''), niche),
                     city          = COALESCE(NULLIF(?, ''), city),
                     notes         = COALESCE(NULLIF(?, ''), notes),
+                    missed_calls  = MAX(missed_calls, ?),
                     updated_ts    = ?
                 WHERE id = ?
                 """,
                 (contact_name, email, phone, website,
-                 niche, city, notes, now, existing["id"]),
+                 niche, city, notes, int(missed_calls), now, existing["id"]),
             )
             return int(existing["id"]), False
 
         cur = db.execute(
             """
             INSERT INTO leads (dedupe_key, business_name, contact_name, email, phone,
-                               website, niche, city, notes, source, created_ts, updated_ts)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               website, niche, city, notes, missed_calls, source,
+                               created_ts, updated_ts)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (key, business_name, contact_name, email, phone, website,
-             niche, city, notes, source, now, now),
+             niche, city, notes, int(missed_calls), source, now, now),
         )
         return int(cur.lastrowid), True
 
@@ -191,9 +231,16 @@ def get_lead(lead_id: int) -> Optional[dict]:
 def find_leads(
     status: Optional[str] = None,
     niche: Optional[str] = None,
+    tier: Optional[str] = None,
     limit: int = 50,
 ) -> list[dict]:
-    """List leads, newest first, optionally filtered by status and/or niche."""
+    """
+    List leads, best first, optionally filtered by status, niche, and/or tier.
+
+    Ordering is tier before score. Tiers sort as 'A' < 'B' alphabetically, and
+    the CASE puts unqualified leads (empty tier) last instead of first, which
+    is what a plain ORDER BY tier would do with an empty string.
+    """
     sql = "SELECT * FROM leads WHERE 1 = 1"
     params: list = []
     if status:
@@ -202,14 +249,21 @@ def find_leads(
     if niche:
         sql += " AND niche = ?"
         params.append(niche)
-    sql += " ORDER BY score DESC, created_ts DESC LIMIT ?"
+    if tier:
+        sql += " AND tier = ?"
+        params.append(tier)
+    sql += """
+        ORDER BY CASE WHEN tier = '' THEN 1 ELSE 0 END, tier ASC,
+                 score DESC, created_ts DESC
+        LIMIT ?
+    """
     params.append(limit)
     with _conn() as db:
         return _rows(db.execute(sql, params).fetchall())
 
 
 def set_lead_status(lead_id: int, status: str, score: Optional[int] = None,
-                    reason: str = "") -> None:
+                    reason: str = "", tier: Optional[str] = None) -> None:
     if status not in LEAD_STATUSES:
         raise ValueError(f"Unknown lead status {status!r}; expected one of {LEAD_STATUSES}")
     with _conn() as db:
@@ -218,11 +272,12 @@ def set_lead_status(lead_id: int, status: str, score: Optional[int] = None,
             UPDATE leads SET
                 status     = ?,
                 score      = COALESCE(?, score),
+                tier       = COALESCE(?, tier),
                 reason     = COALESCE(NULLIF(?, ''), reason),
                 updated_ts = ?
             WHERE id = ?
             """,
-            (status, score, reason, time.time(), lead_id),
+            (status, score, tier, reason, time.time(), lead_id),
         )
 
 
@@ -375,11 +430,24 @@ def stats() -> dict:
                 "SELECT status, COUNT(*) AS n FROM outbox GROUP BY status"
             ).fetchall()
         }
+        # Only count tiers for leads still worth working — a tier on a lead
+        # you already contacted is history, not a to-do.
+        by_tier = {
+            r["tier"]: r["n"]
+            for r in db.execute(
+                """
+                SELECT tier, COUNT(*) AS n FROM leads
+                WHERE tier != '' AND status IN ('qualified', 'queued')
+                GROUP BY tier
+                """
+            ).fetchall()
+        }
         total_leads = db.execute("SELECT COUNT(*) AS n FROM leads").fetchone()["n"]
         suppressed = db.execute("SELECT COUNT(*) AS n FROM suppression").fetchone()["n"]
     return {
         "total_leads": total_leads,
         "leads_by_status": leads_by_status,
+        "open_by_tier": by_tier,
         "outbox_by_status": outbox_by_status,
         "suppressed": suppressed,
     }

@@ -416,6 +416,7 @@ TOOLS = [
                 "properties": {
                     "status": {"type": "string", "description": "new|qualified|rejected|queued|contacted|replied|won|lost|do_not_contact"},
                     "niche": {"type": "string"},
+                    "tier": {"type": "string", "enum": ["A", "B"], "description": "A = missed-call evidence (work first), B = target niche + no website"},
                     "limit": {"type": "integer", "default": 25},
                 },
             },
@@ -452,10 +453,13 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "keisha_run_pipeline",
-            "description": "Score all new leads and draft messages for the qualified ones. Everything lands pending approval; nothing is sent.",
+            "description": "Score all new leads and draft messages for the qualified ones, hottest tier first. Everything lands pending approval; nothing is sent.",
             "parameters": {
                 "type": "object",
-                "properties": {"limit": {"type": "integer", "default": 20}},
+                "properties": {
+                    "limit": {"type": "integer", "default": 20},
+                    "tier": {"type": "string", "enum": ["A", "B"], "description": "Restrict to one tier; default drafts both with A first"},
+                },
             },
         },
     },
@@ -612,11 +616,11 @@ async def _dispatch(name: str, args: dict) -> str:
         return keisha.import_csv(args["path"], args.get("default_niche", ""))
     if name == "keisha_list_leads":
         rows = leads.find_leads(status=args.get("status"), niche=args.get("niche"),
-                                limit=args.get("limit", 25))
+                                tier=args.get("tier"), limit=args.get("limit", 25))
         if not rows:
             return "No leads match."
         return "\n".join(
-            f"#{r['id']} [{r['status']} {r['score']}] {r['business_name']} "
+            f"#{r['id']} [tier {r['tier'] or '-'} | {r['status']} {r['score']}] {r['business_name']} "
             f"({r['niche'] or '?'}, {r['city'] or '?'}) {r['email'] or r['phone']}"
             for r in rows
         )
@@ -625,7 +629,7 @@ async def _dispatch(name: str, args: dict) -> str:
     if name == "keisha_draft":
         return await keisha.draft(args["lead_id"], args.get("channel", "email"))
     if name == "keisha_run_pipeline":
-        return await keisha.run_pipeline(limit=args.get("limit", 20))
+        return await keisha.run_pipeline(limit=args.get("limit", 20), tier=args.get("tier"))
     if name == "keisha_review":
         return keisha.review(limit=args.get("limit", 10), status=args.get("status", "pending"))
     if name == "keisha_approve":

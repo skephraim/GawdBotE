@@ -36,10 +36,10 @@ believe them.
 |---|---|
 | `keisha import <file.csv> [--niche X]` | Bulk-load leads, dedupe, score |
 | `keisha add "Name" --email … --niche …` | Add one lead by hand |
-| `keisha leads [--status X] [--niche Y]` | List what's in the pipeline |
+| `keisha leads [--status X] [--niche Y] [--tier A\|B]` | List what's in the pipeline |
 | `keisha qualify <lead_id>` | Re-score one lead, with the reasons |
 | `keisha draft <lead_id> [--no-llm]` | Write one pitch into the queue |
-| `keisha run [--limit N]` | Score all new + draft all qualified |
+| `keisha run [--limit N] [--tier A\|B]` | Score all new + draft all qualified, tier A first |
 | `keisha review [--status pending]` | Read what's waiting on you |
 | `keisha approve <outbox_id>` | Authorize one message |
 | `keisha reject <outbox_id> "why"` | Kill it; lead goes back in the pool |
@@ -66,6 +66,35 @@ Telegram, Discord, Slack, or voice.
 | Reachable (email or phone) | **+10** | You can't pitch a ghost |
 
 A lead needs `KEISHA_MIN_SCORE` (default 60) **and** a way to reach them.
+
+### Tiers: both signals count, but not equally
+
+Qualified leads split into two tiers, and Keisha works **A before B**:
+
+| Tier | Means | Why it sorts there |
+|---|---|---|
+| **A** | Qualified **and** a known missed-call problem | You can point at a problem they already admit they have |
+| **B** | Qualified on target niche + no website alone | Still worth pitching — but you're inferring the pain |
+
+Tier B is your **backlog, not your trash**. `keisha run` drafts A first and
+spends your daily budget on the hottest leads; `keisha run --tier A` restricts
+to A entirely; `keisha leads --tier B` shows what's waiting behind them.
+
+If you'd rather never pitch on an inference, set `KEISHA_REQUIRE_MISSED_CALLS=true`
+and Tier B stops qualifying at all:
+
+```
+#2 Gulf Coast HVAC — PASS (85/100, threshold 60)
+  +40 in a target niche (hvac)
+  +35 no website found — that's the gap you close
+  +10 reachable (email)
+  PASS: strict mode is on and there's no missed-call evidence
+```
+
+Keisha learns the missed-call fact from a CSV column (`Missed Call Issue`,
+`missed_calls`, and similar all work — headers are matched loosely) or from
+`keisha add … --missed-calls`. The flag is **sticky**: once stored, a later
+import that simply doesn't mention it cannot erase it.
 
 Two things override the number entirely — no score is high enough to beat
 them: a lead marked `do_not_contact`, and any address on the suppression list.
@@ -109,6 +138,7 @@ contact with reality, and what replaced them:
 | `self.outreach_count` in memory | Restart the script, counter is back to 0, cap blown twice over | `leads.sent_since()` counts real sent rows in SQLite |
 | `qualify_lead()` returns `True`/`False` | Can't tell a 61 from a 99, can't prioritize | Score 0-100 with every point explained |
 | Leads passed in as function arguments | Nothing stored — no dedupe, no history, no follow-up | `leads` table with a dedupe key |
+| One qualified pile | Nothing tells you which lead to call first | Tier A (missed-call evidence) before Tier B |
 | `print()` instead of sending | No approval step, so "wire up the API" = instantly live | Outbox queue with an explicit human yes |
 
 One more, about the copy itself. The prototype opened with *"I noticed you're
@@ -227,6 +257,47 @@ SELECT status, COUNT(*) AS n FROM leads GROUP BY status;
 
 `GROUP BY` collapses many rows into one row per distinct status; `COUNT(*)`
 says how many fell into each pile. That single line is the whole report.
+
+**Sort with a `CASE`.** Tiers are `'A'`, `'B'`, or `''` for unqualified. A plain
+`ORDER BY tier` would put the empty strings **first**, which is backwards:
+
+```sql
+ORDER BY CASE WHEN tier = '' THEN 1 ELSE 0 END,   -- unqualified to the bottom
+         tier ASC,                                 -- then A before B
+         score DESC;                               -- then best score first
+```
+
+`CASE` is SQL's `if`. Here it invents a throwaway sort column — 0 for real
+tiers, 1 for blanks — so the blanks fall to the end.
+
+**Migrations.** `CREATE TABLE IF NOT EXISTS` builds a table that isn't there,
+but it will **not** touch one that already is. So when this project added the
+`tier` and `missed_calls` columns, every database created before that change
+was missing them. That's what `_migrate()` handles:
+
+```python
+have = {r["name"] for r in c.execute("PRAGMA table_info(leads)")}
+if "tier" not in have:
+    c.execute("ALTER TABLE leads ADD COLUMN tier TEXT NOT NULL DEFAULT ''")
+```
+
+`PRAGMA table_info` asks SQLite to describe its own table — like asking a
+building what rooms it has before you try to walk into one.
+
+Order matters here, and getting it wrong is how I broke it the first time:
+tables → migrate → **then** indexes. An index on a column the table doesn't
+have yet fails outright, and that's exactly what an old database hitting a new
+index looks like.
+
+**`MAX()` for a sticky flag.**
+
+```sql
+UPDATE leads SET missed_calls = MAX(missed_calls, ?) WHERE id = ?;
+```
+
+Since the column is 0 or 1, `MAX(old, new)` means "true once, true forever."
+A re-import that omits the column passes 0, and `MAX(1, 0)` is still 1 — the
+fact you learned survives a lazier spreadsheet. A one-way door.
 
 **An index.** `CREATE INDEX idx_leads_status ON leads (status);` — the book's
 index instead of reading every page. You won't feel it at 200 leads. At 200,000

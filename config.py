@@ -106,6 +106,9 @@ KEISHA_TARGET_NICHES = [
 ]
 # A lead must score at least this much to be worth pitching (see tools/keisha.py).
 KEISHA_MIN_SCORE = int(os.getenv("KEISHA_MIN_SCORE", "60"))
+# Strict targeting: when true, a lead with no known missed-call problem (tier B)
+# stops qualifying at all, and only tier A gets pitched.
+KEISHA_REQUIRE_MISSED_CALLS = os.getenv("KEISHA_REQUIRE_MISSED_CALLS", "false").lower() == "true"
 # Hard ceiling on messages actually sent per rolling calendar day.
 KEISHA_DAILY_LIMIT = int(os.getenv("KEISHA_DAILY_LIMIT", "50"))
 

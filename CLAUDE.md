@@ -68,6 +68,13 @@ gawdbote/
 
 ## Keisha Rules (lead-gen agent)
 
+- Qualified leads carry a tier: A = missed-call evidence (work first),
+  B = target niche + no website. `find_leads` orders A before B; do not
+  change that ordering without a reason.
+- The `missed_calls` column is sticky (`MAX(old, new)`): a sparse re-import
+  must never unlearn a known missed-call problem.
+- New columns need an entry in `_MIGRATIONS` in core/leads.py. Order in
+  `_conn()` is tables → migrate → indexes, never indexes before migrate.
 - Keisha NEVER sends outreach autonomously. Drafts go to the `outbox` table as
   `pending` and require a human to set them `approved`.
 - `keisha_send` / `keisha send` delivers ONLY `approved` rows, re-checks the
