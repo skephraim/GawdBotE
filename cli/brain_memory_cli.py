@@ -12,6 +12,8 @@ Brain, memory and usage commands.
   python main.py memory forget <id>       delete one memory
   python main.py memory prune [days]      delete chat exchanges older than N days
   python main.py memory reembed           re-vector durable memories with the current embedding brain
+  python main.py memory about <name>      everything known about one person, project or thing
+  python main.py memory connect <a> -- <b>   how two things connect, hop by hop
 
   python main.py usage [days]             tokens and cost per brain over the last N days (default 30)
 """
@@ -55,6 +57,11 @@ def memory_main(argv: list[str]) -> None:
     elif cmd == "prune":
         days = int(argv[1]) if len(argv) > 1 else None
         print(f"Deleted {memory.prune_exchanges(days):,} old chat exchanges.")
+    elif cmd == "about" and len(argv) > 1:
+        print(memory.about_text(" ".join(argv[1:])))
+    elif cmd == "connect" and "--" in argv[1:]:
+        cut = argv.index("--")
+        print(memory.connect_text(" ".join(argv[1:cut]), " ".join(argv[cut + 1:])))
     elif cmd == "reembed":
         count, model = asyncio.run(memory.reembed())
         print(f"Re-embedded {count:,} memories with {model}." if model else "No embedding brain is available.")

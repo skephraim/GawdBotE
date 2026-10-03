@@ -105,8 +105,11 @@ def verify(archive_path: str) -> bool:
         return True
 
 
-def main() -> None:
-    args = sys.argv[1:]
+def main(argv: list[str] | None = None) -> None:
+    # main.py passes only the words after "backup". Run directly (python -m cli.backup),
+    # the words come from sys.argv. The old code always read sys.argv, so through main.py
+    # it saw "backup" as the command and printed "Unknown command: backup".
+    args = sys.argv[1:] if argv is None else argv
     if not args:
         print("Usage:")
         print("  python -m cli.backup create [--no-data]")

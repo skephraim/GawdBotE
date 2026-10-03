@@ -396,7 +396,7 @@ def test_both_methods_agreeing_ranks_highest(monkeypatch):
     run(memory.store("song budget notes", kind="note"))
     run(memory.store("Album cost estimate is high", kind="note"))
     top = run(memory.search("album cost"))[0]
-    assert top["content"].startswith("Album cost") and top["matched"] == "both"
+    assert top["content"].startswith("Album cost") and top["matched"] == "keyword+meaning"
 
 
 def test_vectors_from_different_models_are_never_compared(monkeypatch):
@@ -740,3 +740,19 @@ def test_clients_use_short_timeouts_and_few_retries(monkeypatch):
     llm._openai_client(brains.Brain("x", "openai_compat", "m", "http://localhost:1/v1", no_key=True),
                        timeout=llm.EMBED_TIMEOUT_SECONDS, retries=0)
     assert seen["timeout"] == llm.EMBED_TIMEOUT_SECONDS and seen["max_retries"] == 0
+
+
+# ── Backup command ─────────────────────────────────────────────────────────────
+
+def test_backup_command_works_through_main_py(monkeypatch, capsys):
+    """`python main.py backup create` used to print "Unknown command: backup"."""
+    from cli import backup
+    made = []
+    monkeypatch.setattr(backup, "create", lambda include_data=True: made.append(include_data))
+    backup.main(["create", "--no-data"])
+    backup.main(["create"])
+    assert made == [False, True]
+    import sys as _sys
+    monkeypatch.setattr(_sys, "argv", ["main.py", "backup"])
+    backup.main([])                                     # no subcommand: usage, not a crash
+    assert "Usage" in capsys.readouterr().out

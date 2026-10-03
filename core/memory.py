@@ -13,10 +13,14 @@ Search uses two methods at once and blends the results:
      model are ever compared. Switching providers no longer breaks search; run
      `python main.py memory reembed` to bring old memories onto the new model.
 
-The two ranked lists are blended with Reciprocal Rank Fusion: each list votes
-1 / (60 + rank) for its results and the votes are added up. A memory found by both
-methods rises to the top. Think of two clinicians independently ranking a differential
-diagnosis: what both put near the top is probably right.
+  3. Graph expansion (core/graph.py), adapted from Graphify: from the best results, follow
+     the people and projects they mention to OTHER memories about them, never walking
+     through "hub" entities that touch everything.
+
+The ranked lists are blended with Reciprocal Rank Fusion: each list votes 1 / (60 + rank)
+for its results and the votes are added up. A memory found by several methods rises to the
+top. Think of independent clinicians ranking a differential diagnosis: what they agree on
+near the top is probably right.
 
 At the start of every run the agent is handed the few most relevant durable memories and
 any deadlines coming up, so it remembers without being asked to search.
@@ -35,13 +39,15 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 import config
+from core import graph
 
 log = logging.getLogger(__name__)
 
 KINDS = ("fact", "preference", "decision", "deadline", "task", "note", "exchange")
 DURABLE_KINDS = tuple(k for k in KINDS if k != "exchange")
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2          # 1: memory_items + FTS   2: + entity graph
 RRF_K = 60
+GRAPH_DEPTH = 1            # hops to walk from the seed memories' entities
 MAX_CONTENT_CHARS = 20_000
 
 _kinds_sql = ", ".join(f"'{k}'" for k in KINDS)
@@ -96,7 +102,11 @@ def _db():
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA journal_mode=WAL")
+        # SQLite ships with foreign keys OFF for backward compatibility. Turning them on per
+        # connection is what makes ON DELETE CASCADE actually clean up the graph.
+        conn.execute("PRAGMA foreign_keys = ON")
         conn.executescript(_SCHEMA)
+        conn.executescript(graph.SCHEMA)
         try:
             conn.executescript(_FTS)
             _has_fts = True
@@ -119,7 +129,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
     Old vectors are not copied because nobody recorded which model made them;
     `python main.py memory reembed` rebuilds them.
     """
-    if conn.execute("PRAGMA user_version").fetchone()[0] >= SCHEMA_VERSION:
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if version >= SCHEMA_VERSION:
+        return
+    if version >= 1:
+        # 1 -> 2: the graph tables were just created by graph.SCHEMA; existing memories are
+        # untouched and join the graph as entities get named in new memories.
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         return
     old = conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'memories'").fetchone()
     if old:
@@ -166,8 +182,13 @@ async def _embed_one(text: str, purpose: str) -> Optional[tuple[bytes, str]]:
 # ── Writing ────────────────────────────────────────────────────────────────────
 
 async def store(content: str, source: str = "agent", kind: str = "note",
-                due_ts: Optional[float] = None, pinned: bool = False) -> int:
-    """Save a memory and return its id. Saving the same durable memory twice returns the first id."""
+                due_ts: Optional[float] = None, pinned: bool = False,
+                about: Optional[Iterable[str]] = None) -> int:
+    """
+    Save a memory and return its id. Saving the same durable memory twice returns the first id.
+    about: names of the people, projects or things this memory is about. Known entities named
+    in the text are linked automatically as well.
+    """
     if kind not in KINDS:
         raise ValueError(f"kind must be one of {KINDS}")
     content = (content or "").strip()[:MAX_CONTENT_CHARS]
@@ -177,6 +198,8 @@ async def store(content: str, source: str = "agent", kind: str = "note",
     if kind != "exchange":
         with _db() as db:
             dup = db.execute("SELECT id FROM memory_items WHERE kind = ? AND content = ?", (kind, content)).fetchone()
+            if dup:
+                graph.link_memory(db, dup["id"], content, about or [])
         if dup:
             return dup["id"]
 
@@ -192,13 +215,16 @@ async def store(content: str, source: str = "agent", kind: str = "note",
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (time.time(), kind, content, source, due_ts, int(pinned), model, vec),
         )
+        graph.link_memory(db, cur.lastrowid, content, about or [])
         return cur.lastrowid
 
 
 def forget(memory_id: int) -> bool:
     """Delete one memory. Returns True if it existed."""
     with _db() as db:
-        return db.execute("DELETE FROM memory_items WHERE id = ?", (int(memory_id),)).rowcount > 0
+        gone = db.execute("DELETE FROM memory_items WHERE id = ?", (int(memory_id),)).rowcount > 0
+        graph.cleanup(db)       # mentions and relations went with it (CASCADE); drop orphan entities
+        return gone
 
 
 def delete(memory_id: int) -> str:     # kept for older callers
@@ -210,8 +236,10 @@ def prune_exchanges(days: Optional[int] = None) -> int:
     days = config.MEMORY_EXCHANGE_DAYS if days is None else days
     cutoff = time.time() - days * 86_400
     with _db() as db:
-        return db.execute("DELETE FROM memory_items WHERE kind = 'exchange' AND ts < ? AND pinned = 0",
-                          (cutoff,)).rowcount
+        n = db.execute("DELETE FROM memory_items WHERE kind = 'exchange' AND ts < ? AND pinned = 0",
+                       (cutoff,)).rowcount
+        graph.cleanup(db)
+        return n
 
 
 # ── Searching ──────────────────────────────────────────────────────────────────
@@ -292,9 +320,14 @@ async def search(query: str, top_k: Optional[int] = None, kinds: Optional[Iterab
         keyword = _keyword_ranks(db, query, kinds, pool)
     meaning = await _vector_ranks(query, kinds, pool)
 
+    # Seeds for the graph walk: the strongest direct hits from either method.
+    seeds = list(dict.fromkeys(keyword[:3] + meaning[:3]))
+    with _db() as db:
+        connected = graph.expand(db, seeds, query, depth=GRAPH_DEPTH, limit=pool, kinds=kinds)
+
     votes: dict[int, float] = {}
     how: dict[int, set] = {}
-    for label, ranked in (("keyword", keyword), ("meaning", meaning)):
+    for label, ranked in (("keyword", keyword), ("meaning", meaning), ("graph", connected)):
         for rank, mid in enumerate(ranked, start=1):
             votes[mid] = votes.get(mid, 0.0) + 1.0 / (RRF_K + rank)
             how.setdefault(mid, set()).add(label)
@@ -310,7 +343,7 @@ async def search(query: str, top_k: Optional[int] = None, kinds: Optional[Iterab
         if row["pinned"]:
             score *= 1.5
         row["score"] = score
-        row["matched"] = "both" if len(how[mid]) == 2 else next(iter(how[mid]))
+        row["matched"] = "+".join(sorted(how[mid]))
         results.append(row)
     results.sort(key=lambda r: r["score"], reverse=True)
     return results[:top_k]
@@ -353,8 +386,9 @@ def stats() -> dict:
         models = {r["embed_model"]: r["n"] for r in db.execute(
             "SELECT embed_model, COUNT(*) AS n FROM memory_items WHERE embed_model IS NOT NULL GROUP BY embed_model")}
         legacy = db.execute("SELECT 1 FROM sqlite_master WHERE name = 'memories_legacy'").fetchone() is not None
+        graph_stats = graph.stats(db)
     return {"by_kind": by_kind, "total": sum(by_kind.values()), "embedded_by_model": models,
-            "keyword_index": "fts5" if _has_fts else "like", "legacy_table_kept": legacy}
+            "keyword_index": "fts5" if _has_fts else "like", "legacy_table_kept": legacy, "graph": graph_stats}
 
 
 async def reembed(batch: int = 32) -> tuple[int, Optional[str]]:
@@ -410,3 +444,48 @@ def format_for_prompt(rows: list[dict]) -> str:
         "From your own memory database. It may be out of date; trust the owner's newest words over it.\n"
         + format_results(rows, width=500)
     )
+
+
+# ── Graph questions ────────────────────────────────────────────────────────────
+
+def link(subject: str, relation: str, obj: str, memory_id: Optional[int] = None) -> str:
+    """Record a named link between two things. Returns how confident the link is."""
+    with _db() as db:
+        return graph.add_relation(db, subject, relation, obj, memory_id)
+
+
+def about_text(name: str) -> str:
+    """A readable card of everything known about one person, project or thing."""
+    with _db() as db:
+        card = graph.about(db, name)
+    if card is None:
+        return f"I have nothing filed about {name!r}."
+    lines = [f"{card['name']}: mentioned in {card['memory_count']} memories"]
+    if card["links"]:
+        lines.append("Links:")
+        for l in card["links"]:
+            arrow = f"{card['name']} {l['relation']} {l['other']}" if l["direction"] == "out" \
+                else f"{l['other']} {l['relation']} {card['name']}"
+            src = f", from memory #{l['memory_id']}" if l["memory_id"] else ""
+            lines.append(f"  {arrow} [{l['confidence']}{src}]")
+    if card["mentioned_with"]:
+        lines.append("Often mentioned with: " + ", ".join(f"{r['name']} ({r['n']})" for r in card["mentioned_with"]))
+    if card["memories"]:
+        lines.append("Memories:")
+        lines.append(format_results(card["memories"], width=200))
+    return "\n".join(lines)
+
+
+def connect_text(a: str, b: str) -> str:
+    """How two things are connected, hop by hop, with the evidence for each hop."""
+    with _db() as db:
+        steps = graph.connect(db, a, b)
+    if steps is None:
+        return f"I can't find a connection between {a!r} and {b!r} in memory."
+    if not steps:
+        return f"{a!r} and {b!r} are the same thing in memory."
+    lines = [f"{len(steps)} hop{'s' if len(steps) != 1 else ''}:"]
+    for st in steps:
+        src = f", memory #{st['memory_id']}" if st["memory_id"] else ""
+        lines.append(f"  {st['from']} --{st['relation']}--> {st['to']} [{st['confidence']}{src}]")
+    return "\n".join(lines)
