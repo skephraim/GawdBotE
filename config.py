@@ -111,6 +111,18 @@ WEBHOOK_PORT = int(os.getenv("WEBHOOK_PORT", "8080"))
 WEBHOOK_SECRET = _secret("WEBHOOK_SECRET")   # no default: the server refuses to start without a strong one
 WEBHOOK_ENABLED = os.getenv("WEBHOOK_ENABLED", "true").lower() == "true"
 
+# ── Event log (audit trail of every run) ───────────────────────────────────────
+EVENTS_DB = os.getenv("EVENTS_DB", str(PROJECT_ROOT / "data" / "events.db"))
+
+# ── Approvals ──────────────────────────────────────────────────────────────────
+# Risky tools wait for the owner's yes. No answer in time means NO.
+APPROVAL_TIMEOUT_SECONDS = int(os.getenv("APPROVAL_TIMEOUT_SECONDS", "300"))
+# Runs with no live chat (cron, webhook, voice, Slack) send approval requests here.
+APPROVAL_OWNER_CHANNEL = os.getenv("APPROVAL_OWNER_CHANNEL", "telegram").strip().lower()
+# Tools that skip approval, comma separated. Empty by default. Think hard before adding
+# run_command: it lets the agent do anything you can do on this computer without asking.
+TRUSTED_TOOLS = {t.strip() for t in os.getenv("TRUSTED_TOOLS", "").split(",") if t.strip()}
+
 # ── Web search ─────────────────────────────────────────────────────────────────
 WEB_SEARCH_PROVIDER = os.getenv("WEB_SEARCH_PROVIDER", "duckduckgo")  # duckduckgo | brave
 BRAVE_API_KEY = _secret("BRAVE_API_KEY")

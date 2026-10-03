@@ -33,10 +33,13 @@ Do not modify .env, .git, or data/ directories.
 Do not break existing functionality."""
 
 
-async def evolve(request: str, source: str = "user") -> str:
+async def evolve(request: str, source: str = "user", ask=None, channel: str | None = None) -> str:
     """
     Trigger a self-improvement cycle.
     Returns a summary of what was done.
+
+    ask/channel: how to reach the owner for approvals. Every file write, commit and push
+    in a self evolution run is an ASK tier action, so without a way to ask, nothing changes.
     """
     log.info("Self-evolution requested: %r from %s", request, source)
 
@@ -48,7 +51,9 @@ async def evolve(request: str, source: str = "user") -> str:
         "Begin by reading CLAUDE.md, then proceed with the changes."
     )
 
-    result = await agent.run(evolve_prompt, source=f"evolve/{source}", max_rounds=20)
+    result = await agent.run(
+        evolve_prompt, source=f"evolve/{source}", max_rounds=20, ask=ask, channel=channel or source,
+    )
 
     # Store what we evolved
     await memory.store(

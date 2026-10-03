@@ -1,29 +1,41 @@
 """
-GawdBotE core agent — agentic loop with tool calling.
-Receives messages from any interface (voice, Telegram, Discord, Slack, webhooks)
-and returns a response string.
+GawdBotE core agent: the agentic loop.
+
+Receives a message from any interface (voice, Telegram, Discord, Slack, webhook, cron),
+lets the LLM call tools until it has an answer, and returns that answer as text.
+
+Every step is written to the event log (core/events.py), and every ASK tier tool goes
+through the approval gate (core/approvals.py) before it runs.
 """
 from __future__ import annotations
+
+import asyncio
 import json
 import logging
+import time
 from typing import Optional
 
-import config
-from core import llm, memory, skills as skills_mod
-from tools import git_tools, code_tools, pc_control, web_search
+from core import approvals, events, llm, memory, registry
+from core import skills as skills_mod
+from core.context import Asker, RunContext
+import tools.builtin  # noqa: F401  (importing registers every built in tool)
 
 log = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are GawdBotE — a powerful, self-improving AI assistant with full system access.
+SYSTEM_PROMPT = """You are GawdBotE, a powerful, self-improving AI assistant running on the owner's own computer.
 
 Capabilities:
 - Files & shell: read/write files, run commands, edit code
 - Git & GitHub: commit, branch, push, create PRs
-- PC control: mouse, keyboard, screenshots, open apps, clipboard
+- PC control: mouse, keyboard, screen, open apps, clipboard
 - Web search: search the internet for current information
 - Memory: store and recall information persistently
-- Vision: analyze screenshots and images
 - Self-improvement: read and edit your own source code
+
+Approvals:
+- Some actions need the owner's approval. They are asked automatically; you do not ask in chat.
+- If an action is not approved, do NOT retry it or work around it with another tool.
+  Say what you wanted to do and why, and ask how the owner would like to proceed.
 
 Guidelines:
 - Be direct and concise in responses
@@ -32,488 +44,114 @@ Guidelines:
 - Ask one clarifying question if the request is genuinely ambiguous
 - Use web search when you need current information you may not have"""
 
-TOOLS = [
-    # ── File / shell ──────────────────────────────────────────────────────────
-    {
-        "type": "function",
-        "function": {
-            "name": "read_file",
-            "description": "Read the contents of a file",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "File path (relative to project root or absolute)"},
-                },
-                "required": ["path"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "write_file",
-            "description": "Write content to a file (creates or overwrites)",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string"},
-                    "content": {"type": "string"},
-                },
-                "required": ["path", "content"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "run_command",
-            "description": "Run a shell command and return its output",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "command": {"type": "string"},
-                    "cwd": {"type": "string", "description": "Working directory (optional)"},
-                },
-                "required": ["command"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_project_files",
-            "description": "List all project source files",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    # ── Memory ────────────────────────────────────────────────────────────────
-    {
-        "type": "function",
-        "function": {
-            "name": "memory_store",
-            "description": "Store a piece of information in persistent memory",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "content": {"type": "string", "description": "The information to remember"},
-                },
-                "required": ["content"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "memory_search",
-            "description": "Search persistent memory for relevant information",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string"},
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    # ── Web search ────────────────────────────────────────────────────────────
-    {
-        "type": "function",
-        "function": {
-            "name": "web_search",
-            "description": "Search the web for current information",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Search query"},
-                    "max_results": {"type": "integer", "description": "Number of results (default 5)", "default": 5},
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    # ── Git ───────────────────────────────────────────────────────────────────
-    {
-        "type": "function",
-        "function": {
-            "name": "git_status",
-            "description": "Show git status of the project",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "git_diff",
-            "description": "Show git diff",
-            "parameters": {
-                "type": "object",
-                "properties": {"file": {"type": "string", "description": "Optional file path"}},
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "git_log",
-            "description": "Show recent git commits",
-            "parameters": {
-                "type": "object",
-                "properties": {"n": {"type": "integer", "description": "Number of commits", "default": 10}},
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "git_commit",
-            "description": "Commit changes to git",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "message": {"type": "string"},
-                    "files": {"type": "array", "items": {"type": "string"}},
-                },
-                "required": ["message", "files"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "git_create_branch",
-            "description": "Create and switch to a new git branch",
-            "parameters": {
-                "type": "object",
-                "properties": {"name": {"type": "string"}},
-                "required": ["name"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "git_push",
-            "description": "Push current branch to remote",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "github_create_pr",
-            "description": "Create a GitHub pull request",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "title": {"type": "string"},
-                    "body": {"type": "string"},
-                    "head": {"type": "string", "description": "Source branch"},
-                },
-                "required": ["title", "body", "head"],
-            },
-        },
-    },
-    # ── PC control ────────────────────────────────────────────────────────────
-    {
-        "type": "function",
-        "function": {
-            "name": "take_screenshot",
-            "description": "Take a screenshot and return it as base64 PNG",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "mouse_click",
-            "description": "Click the mouse at coordinates",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "x": {"type": "integer"},
-                    "y": {"type": "integer"},
-                    "button": {"type": "string", "enum": ["left", "right", "middle"], "default": "left"},
-                    "clicks": {"type": "integer", "default": 1},
-                },
-                "required": ["x", "y"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "type_text",
-            "description": "Type text using the keyboard",
-            "parameters": {
-                "type": "object",
-                "properties": {"text": {"type": "string"}},
-                "required": ["text"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "press_key",
-            "description": "Press a key or keyboard shortcut (e.g. 'ctrl+c', 'enter', 'alt+F4')",
-            "parameters": {
-                "type": "object",
-                "properties": {"key": {"type": "string"}},
-                "required": ["key"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_clipboard",
-            "description": "Read the clipboard contents",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "set_clipboard",
-            "description": "Set clipboard contents",
-            "parameters": {
-                "type": "object",
-                "properties": {"text": {"type": "string"}},
-                "required": ["text"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_windows",
-            "description": "List open windows",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "focus_window",
-            "description": "Focus a window by title substring",
-            "parameters": {
-                "type": "object",
-                "properties": {"title_substr": {"type": "string"}},
-                "required": ["title_substr"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "open_app",
-            "description": "Launch an application",
-            "parameters": {
-                "type": "object",
-                "properties": {"app": {"type": "string", "description": "Application name or path"}},
-                "required": ["app"],
-            },
-        },
-    },
-    # ── Skills ────────────────────────────────────────────────────────────────
-    {
-        "type": "function",
-        "function": {
-            "name": "skill_list",
-            "description": "List all installed skills",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "skill_search",
-            "description": "Search installed skills by keyword",
-            "parameters": {
-                "type": "object",
-                "properties": {"query": {"type": "string"}},
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "skill_install",
-            "description": "Install a skill from clawhub.com by name",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string", "description": "Skill name, e.g. 'notion' or 'github'"},
-                    "version": {"type": "string", "description": "Optional version, e.g. '1.2.3'"},
-                },
-                "required": ["name"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "skill_update",
-            "description": "Update a skill (or all skills) from clawhub",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string", "description": "Skill name to update, or omit to update all"},
-                    "force": {"type": "boolean", "default": False},
-                },
-            },
-        },
-    },
-]
 
+def tool_specs() -> list[dict]:
+    """Every registered tool, in the format the LLM layer expects."""
+    return registry.specs()
 
-# ── Tool dispatch ─────────────────────────────────────────────────────────────
 
 async def _dispatch(name: str, args: dict) -> str:
-    if name == "read_file":
-        return code_tools.read_file(**args)
-    if name == "write_file":
-        return code_tools.write_file(**args)
-    if name == "run_command":
-        return await code_tools.run_command(**args)
-    if name == "list_project_files":
-        return code_tools.list_project_files()
-
-    if name == "memory_store":
-        mid = await memory.store(args["content"])
-        return f"Stored as memory #{mid}."
-    if name == "memory_search":
-        results = await memory.search(args["query"])
-        if not results:
-            return "No relevant memories found."
-        lines = [f"[{r['score']:.2f}] {r['content']}" for r in results]
-        return "\n".join(lines)
-
-    if name == "web_search":
-        return await web_search.search(args["query"], max_results=args.get("max_results", 5))
-
-    if name == "git_status":
-        return git_tools.status()
-    if name == "git_diff":
-        return git_tools.diff(args.get("file"))
-    if name == "git_log":
-        return git_tools.log(args.get("n", 10))
-    if name == "git_commit":
-        return git_tools.commit(args["message"], args["files"])
-    if name == "git_create_branch":
-        return git_tools.create_branch(args["name"])
-    if name == "git_push":
-        return git_tools.push()
-    if name == "github_create_pr":
-        import asyncio
-        return await git_tools.create_pr(args["title"], args["body"], args["head"])
-
-    if name == "take_screenshot":
-        return pc_control.take_screenshot()
-    if name == "mouse_click":
-        return pc_control.mouse_click(**args)
-    if name == "type_text":
-        return pc_control.type_text(args["text"])
-    if name == "press_key":
-        return pc_control.press_key(args["key"])
-    if name == "get_clipboard":
-        return pc_control.get_clipboard()
-    if name == "set_clipboard":
-        return pc_control.set_clipboard(args["text"])
-    if name == "list_windows":
-        return pc_control.list_windows()
-    if name == "focus_window":
-        return pc_control.focus_window(args["title_substr"])
-    if name == "open_app":
-        return pc_control.open_app(args["app"])
-
-    if name == "skill_list":
-        return skills_mod.list_skills()
-    if name == "skill_search":
-        return skills_mod.search_skills(args["query"])
-    if name == "skill_install":
-        return skills_mod.install_skill(args["name"], args.get("version", ""))
-    if name == "skill_update":
-        return skills_mod.update_skill(args.get("name", ""), args.get("force", False))
-
-    return f"Unknown tool: {name}"
+    """Run a tool with no approval check. Only _execute() should call this."""
+    return await registry.call(name, args)
 
 
-# ── Agentic loop ──────────────────────────────────────────────────────────────
+async def _execute(ctx: RunContext, call_id: str, name: str, raw_args: str) -> str:
+    """Handle ONE tool call: parse, check risk, get approval, run, log. Always returns text."""
+    try:
+        args = json.loads(raw_args or "{}")
+        if not isinstance(args, dict):
+            raise ValueError("arguments must be a JSON object")
+    except (json.JSONDecodeError, ValueError) as exc:
+        events.record(ctx, "tool_result", tool=name, status="error", preview=f"invalid arguments: {exc}")
+        return f"Tool error: the arguments for {name} were not valid JSON ({exc}). Retry the call."
+
+    spec = registry.get(name)
+    risk = spec.risk_for(args) if spec else "unknown"
+    events.record(ctx, "tool_call", tool=name, risk=risk, args=args, call_id=call_id)
+
+    if spec is None:
+        events.record(ctx, "tool_result", tool=name, status="error", preview="unknown tool")
+        return f"Unknown tool: {name}. Use only the tools you were given."
+
+    if risk != registry.SAFE:
+        approved, reason = await approvals.request(ctx, name, args)
+        if not approved:
+            events.record(ctx, "tool_result", tool=name, status="blocked", preview=reason)
+            return (f"NOT RUN: {name} was not approved because {reason}. "
+                    "Do not retry it. Tell the owner what you wanted to do and ask how to proceed.")
+
+    started = time.perf_counter()
+    try:
+        result = await _dispatch(name, args)
+        status = "error" if result.startswith(("Tool error", "Refused", "Error")) else "ok"
+    except Exception as exc:
+        result, status = f"Tool error: {type(exc).__name__}: {exc}", "error"
+    elapsed = int((time.perf_counter() - started) * 1000)
+    events.record(ctx, "tool_result", tool=name, status=status, duration_ms=elapsed, preview=result[:500])
+    log.debug("Tool %s -> %s (%dms)", name, result[:200], elapsed)
+    return result
+
 
 async def run(
     user_message: str,
     history: Optional[list[dict]] = None,
     source: str = "user",
     max_rounds: int = 10,
+    *,
+    ask: Optional[Asker] = None,
+    channel: Optional[str] = None,
+    ctx: Optional[RunContext] = None,
 ) -> str:
     """
     Run the agentic loop and return a final text response.
-    history: list of prior {role, content} messages for multi-turn context.
-    source: where the message came from (telegram, discord, voice, webhook, …)
+
+    history: prior {role, content} messages for multi turn context.
+    source:  where the message came from (telegram, discord, voice, webhook, cron...)
+    ask:     how to show approval requests to the owner on this channel, if possible
+    channel: which channel may answer approvals (defaults from source)
     """
+    ctx = ctx or RunContext(source=source, channel=channel or "", ask=ask)
     messages: list[dict] = list(history or [])
     messages.append({"role": "user", "content": user_message})
 
-    # Inject relevant skill context into the system prompt
     skill_context = skills_mod.build_skill_context(user_message)
     effective_system = SYSTEM_PROMPT + skill_context if skill_context else SYSTEM_PROMPT
+    events.record(ctx, "run_start", message=user_message, source=source,
+                  skills=[s.name for s in skills_mod.find_relevant(user_message)] if skill_context else [])
 
-    for round_num in range(max_rounds):
-        resp = await llm.chat(messages, tools=TOOLS, system=effective_system)
+    specs = tool_specs()
+    for round_num in range(1, max_rounds + 1):
+        try:
+            resp = await llm.chat(messages, tools=specs, system=effective_system)
+        except Exception as exc:
+            events.record(ctx, "run_end", status="error", rounds=round_num, final=f"LLM failure: {exc}")
+            raise
 
-        # If no tool calls, we're done
+        events.record(ctx, "llm_reply", provider=resp.get("provider"), round=round_num,
+                      text=resp.get("content") or "", tools=[tc["name"] for tc in resp["tool_calls"]])
+
         if not resp["tool_calls"]:
             final = resp["content"]
-            # Store the exchange in memory
-            await memory.store(
-                f"[{source}] User: {user_message}\nAssistant: {final}",
-                source=source,
-            )
+            events.record(ctx, "run_end", status="ok", rounds=round_num, final=final)
+            await memory.store(f"[{source}] User: {user_message}\nAssistant: {final}", source=source)
             return final
 
-        # Append assistant turn with tool calls
         messages.append({
             "role": "assistant",
             "content": resp["content"] or None,
             "tool_calls": [
-                {
-                    "id": tc["id"],
-                    "type": "function",
-                    "function": {"name": tc["name"], "arguments": tc["arguments"]},
-                }
+                {"id": tc["id"], "type": "function", "function": {"name": tc["name"], "arguments": tc["arguments"]}}
                 for tc in resp["tool_calls"]
             ],
         })
 
-        # Execute all tool calls in parallel
-        import asyncio
-        tool_tasks = []
-        for tc in resp["tool_calls"]:
-            try:
-                args = json.loads(tc["arguments"] or "{}")
-                if not isinstance(args, dict):
-                    raise ValueError("arguments must be a JSON object")
-            except (json.JSONDecodeError, ValueError) as exc:
-                # Do NOT quietly run the tool with empty arguments. Tell the model what went
-                # wrong so it can retry with valid arguments.
-                async def _bad_args(err=exc, tool=tc["name"]) -> str:
-                    return f"Tool error: the arguments for {tool} were not valid JSON ({err}). Retry the call."
-                tool_tasks.append((tc["id"], tc["name"], _bad_args()))
-                continue
-            tool_tasks.append((tc["id"], tc["name"], _dispatch(tc["name"], args)))
+        # Tool calls run in parallel. Approval prompts inside them still go one at a time.
+        results = await asyncio.gather(
+            *[_execute(ctx, tc["id"], tc["name"], tc["arguments"]) for tc in resp["tool_calls"]]
+        )
+        for tc, result in zip(resp["tool_calls"], results):
+            messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
 
-        results = await asyncio.gather(*[t[2] for t in tool_tasks], return_exceptions=True)
-
-        for (call_id, name, _), result in zip(tool_tasks, results):
-            if isinstance(result, Exception):
-                result = f"Tool error: {result}"
-            log.debug("Tool %s → %s", name, str(result)[:200])
-            messages.append({
-                "role": "tool",
-                "tool_call_id": call_id,
-                "content": str(result),
-            })
-
-    return "Max tool-call rounds reached. Please simplify the request."
+    final = "Max tool-call rounds reached. Please simplify the request."
+    events.record(ctx, "run_end", status="max_rounds", rounds=max_rounds, final=final)
+    return final

@@ -86,7 +86,7 @@ _SECRET_COMMAND_PATTERNS = [
     (re.compile(r"(^|[;&|]\s*)env\s*($|[;&|>])", re.I), "the environment dump command env"),
     (re.compile(r"/proc/[^\s]*/environ", re.I), "process environment"),
     (re.compile(r"\bGet-ChildItem\s+Env:|\bdir\s+env:|\$env:\w*(KEY|TOKEN|SECRET|PASSWORD)", re.I), "environment variables"),
-    (re.compile(r"memory\.db\b", re.I), "the memory database"),
+    (re.compile(r"(memory|events)\.db\b", re.I), "an internal database"),
 ]
 
 

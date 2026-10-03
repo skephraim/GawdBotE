@@ -106,11 +106,21 @@ if __name__ == "__main__":
         elif cmd == "secrets":
             from cli.secrets_cli import main as secrets_main
             secrets_main(sys.argv[2:])
+        elif cmd == "log":
+            from cli.log_cli import main as log_main
+            log_main(sys.argv[2:])
         elif cmd == "chat":
             # Interactive CLI chat
             async def cli_chat():
-                from core import agent
-                print("GawdBotE interactive chat (Ctrl+C to exit)\n")
+                from core import agent, approvals, events
+
+                async def cli_ask(req):
+                    # The CLI can answer on the spot: show the request, wait for y or n.
+                    print("\n" + req.prompt_text("y", "n"))
+                    answer = await asyncio.to_thread(input, "Approve? [y/N]: ")
+                    approvals.resolve(req.id, answer.strip().lower() in ("y", "yes"), by="cli", channel="cli")
+
+                print("GawdBotE interactive chat (Ctrl+C to exit, /trace shows the last run)\n")
                 history = []
                 while True:
                     try:
@@ -120,13 +130,17 @@ if __name__ == "__main__":
                         break
                     if not user_input:
                         continue
-                    response = await agent.run(user_input, history=history, source="cli")
+                    if user_input == "/trace":
+                        sid = events.last_session_id("cli")
+                        print((events.format_session(sid, max_chars=20_000) if sid else "No runs yet.") + "\n")
+                        continue
+                    response = await agent.run(user_input, history=history, source="cli", ask=cli_ask, channel="cli")
                     print(f"GawdBotE: {response}\n")
                     history.append({"role": "user", "content": user_input})
                     history.append({"role": "assistant", "content": response})
             asyncio.run(cli_chat())
         else:
             print(f"Unknown command: {cmd}")
-            print("Commands: doctor, backup, chat, secrets")
+            print("Commands: doctor, backup, chat, secrets, log")
     else:
         asyncio.run(main())
