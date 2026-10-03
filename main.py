@@ -111,7 +111,7 @@ if __name__ == "__main__":
             doctor_main(fix="--fix" in sys.argv)
         elif cmd == "backup":
             from cli.backup import main as backup_main
-            backup_main()
+            backup_main(sys.argv[2:])
         elif cmd == "secrets":
             from cli.secrets_cli import main as secrets_main
             secrets_main(sys.argv[2:])
