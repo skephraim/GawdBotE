@@ -8,7 +8,7 @@ import asyncio
 import logging
 
 import config
-from core import agent, memory, security, voice
+from core import agent, approvals, events, memory, security, voice
 from core.self_evolve import evolve
 
 log = logging.getLogger(__name__)
@@ -37,6 +37,25 @@ async def run() -> None:
     def _authorized(user_id: int) -> bool:
         return security.is_authorized(user_id, config.TELEGRAM_ALLOWED_USERS)
 
+    def _asker_for(chat_id: int):
+        """Build the function that shows approval requests in this chat."""
+        async def ask(req) -> None:
+            await app.bot.send_message(chat_id=chat_id, text=req.prompt_text("/approve", "/deny"))
+        return ask
+
+    async def _owner_ask(req) -> None:
+        """Approvals for unattended runs (cron, webhook, voice) go to every allowlisted owner's private chat."""
+        sent = 0
+        for uid in config.TELEGRAM_ALLOWED_USERS:
+            if uid.lstrip("-").isdigit():
+                try:
+                    await app.bot.send_message(chat_id=int(uid), text=req.prompt_text("/approve", "/deny"))
+                    sent += 1
+                except Exception as exc:   # the owner may never have pressed Start on the bot
+                    log.warning("Could not send approval to Telegram user %s: %s", uid, exc)
+        if not sent:
+            raise RuntimeError("no allowlisted Telegram user could be reached")
+
     async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not _authorized(update.effective_user.id):
             return
@@ -52,9 +71,32 @@ async def run() -> None:
             "/evolve <request> — trigger self-improvement\n"
             "/memory <query> — search persistent memory\n"
             "/search <query> — web search\n"
+            "/approve <id> or /deny <id> — answer an approval request\n"
+            "/trace — step by step log of the last run\n"
             "Any message — chat with GawdBotE\n"
             "Voice message — transcribed and handled as text"
         )
+
+    async def _answer(update: Update, ctx: ContextTypes.DEFAULT_TYPE, approved: bool) -> None:
+        if not _authorized(update.effective_user.id):
+            return
+        if not ctx.args:
+            await update.message.reply_text(f"Usage: /{'approve' if approved else 'deny'} <id>")
+            return
+        msg = approvals.resolve(ctx.args[0], approved, by=f"telegram:{update.effective_user.id}", channel="telegram")
+        await update.message.reply_text(msg)
+
+    async def cmd_approve(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        await _answer(update, ctx, True)
+
+    async def cmd_deny(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        await _answer(update, ctx, False)
+
+    async def cmd_trace(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not _authorized(update.effective_user.id):
+            return
+        sid = ctx.args[0] if ctx.args else events.last_session_id("telegram")
+        await update.message.reply_text(events.format_session(sid) if sid else "No runs logged yet.")
 
     async def cmd_evolve(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not _authorized(update.effective_user.id):
@@ -64,7 +106,7 @@ async def run() -> None:
             await update.message.reply_text("Usage: /evolve <what to improve>")
             return
         await update.message.reply_text("Starting self-improvement cycle…")
-        result = await evolve(request, source="telegram")
+        result = await evolve(request, source="telegram", ask=_asker_for(update.effective_chat.id), channel="telegram")
         await update.message.reply_text(result[:4000])
 
     async def cmd_memory(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -97,7 +139,7 @@ async def run() -> None:
             return
         text = update.message.text
         await update.message.chat.send_action("typing")
-        response = await agent.run(text, source="telegram")
+        response = await agent.run(text, source="telegram", ask=_asker_for(update.effective_chat.id), channel="telegram")
         await update.message.reply_text(response[:4000])
 
     async def handle_voice(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -125,12 +167,18 @@ async def run() -> None:
 
         await update.message.reply_text(f"Transcribed: {text}")
         await update.message.chat.send_action("typing")
-        response = await agent.run(text, source="telegram_voice")
+        response = await agent.run(text, source="telegram_voice", ask=_asker_for(update.effective_chat.id), channel="telegram")
         await update.message.reply_text(response[:4000])
 
-    app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
+    # concurrent_updates(True) is REQUIRED for approvals. By default Telegram updates are
+    # handled one at a time, so a run waiting for /approve would block the /approve message
+    # itself, and both would wait forever (a deadlock).
+    app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).concurrent_updates(True).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("approve", cmd_approve))
+    app.add_handler(CommandHandler("deny", cmd_deny))
+    app.add_handler(CommandHandler("trace", cmd_trace))
     app.add_handler(CommandHandler("evolve", cmd_evolve))
     app.add_handler(CommandHandler("memory", cmd_memory))
     app.add_handler(CommandHandler("search", cmd_search))
@@ -142,11 +190,13 @@ async def run() -> None:
     await app.start()
     await app.updater.start_polling(drop_pending_updates=True)
     log.info("Telegram bot running")
+    approvals.register_owner_channel("telegram", _owner_ask)
 
     # Keep running until cancelled
     try:
         await asyncio.Event().wait()
     finally:
+        approvals.clear_owner_channel()
         await app.updater.stop()
         await app.stop()
         await app.shutdown()

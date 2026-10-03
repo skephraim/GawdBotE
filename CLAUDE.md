@@ -14,8 +14,13 @@ gawdbote/
 │   ├── voice.py        # Wake word, STT (faster-whisper), TTS (piper)
 │   ├── security.py     # Protected paths, allowlists, secret checks. FAIL CLOSED
 │   ├── vault.py        # OS credential store for API keys (keyring)
+│   ├── registry.py     # @tool decorator: schemas from type hints, risk tiers, dispatch
+│   ├── approvals.py    # Approval gate for ASK tier tools (deny on silence)
+│   ├── events.py       # Append only SQLite audit trail of every run
+│   ├── context.py      # RunContext: session id, channel, how to ask the owner
 │   └── self_evolve.py  # Self-improvement cycle (reads this file first)
 ├── tools/
+│   ├── builtin.py      # EVERY agent tool is registered here with @tool
 │   ├── code_tools.py   # File read/write, shell commands
 │   ├── git_tools.py    # Git operations + GitHub PR creation
 │   ├── pc_control.py   # Mouse, keyboard, clipboard, screenshots, windows
@@ -52,9 +57,21 @@ gawdbote/
 
 ## Adding a New Tool
 
-1. Implement the function in `tools/` (keep it pure/async-friendly)
-2. Add a tool spec to `TOOLS` list in `core/agent.py`
-3. Add dispatch logic in the `_dispatch()` function in `core/agent.py`
+1. Write the function in `tools/builtin.py` (or a module it imports), with type hints and
+   a docstring that has an `Args:` section. The docstring is what the model reads.
+2. Decorate it with `@tool(risk=SAFE)` or `@tool(risk=ASK)`. That is all: the schema,
+   the dispatch and the approval check are automatic.
+3. Choose the risk honestly. SAFE is only for reading or searching with no side effects.
+   Anything that writes, sends, spends, runs code, or reads private data (screen,
+   clipboard, files outside the project) is ASK. Leaving risk out means ASK.
+4. Add a test in `tests/`.
+
+## Approvals and the Event Log
+
+- ASK tier tools wait for the owner's approval. Silence or no reachable owner means NO.
+- Never call `registry.call()` or `agent._dispatch()` directly to skip approval.
+- Every run writes its steps to `data/events.db`. View with `python main.py log`.
+- `TRUSTED_TOOLS` skips approval for listed tools. Never add tools to it on your own.
 
 ## Adding a New Interface
 

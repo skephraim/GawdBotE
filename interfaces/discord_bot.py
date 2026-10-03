@@ -9,7 +9,7 @@ import logging
 from typing import Optional
 
 import config
-from core import agent, memory, security
+from core import agent, approvals, events, memory, security
 from core.self_evolve import evolve
 
 log = logging.getLogger(__name__)
@@ -50,6 +50,39 @@ async def run() -> None:
     async def on_ready():
         log.info("Discord bot ready as %s", bot.user)
 
+    def _asker_for(channel):
+        """Build the function that shows approval requests in this Discord channel."""
+        async def ask(req) -> None:
+            text = req.prompt_text("!approve", "!deny")
+            # Discord caps messages at 2000 characters. Send long prompts in pieces rather
+            # than cutting them, so you always see the whole command you are approving.
+            for i in range(0, len(text), 1900):
+                await channel.send(text[i:i + 1900])
+        return ask
+
+    async def _answer(ctx, request_id: str, approved: bool) -> None:
+        if not _allowed(ctx.channel.id, ctx.author.id):
+            return
+        if not request_id:
+            await ctx.send(f"Usage: `!{'approve' if approved else 'deny'} <id>`")
+            return
+        await ctx.send(approvals.resolve(request_id, approved, by=f"discord:{ctx.author.id}", channel="discord"))
+
+    @bot.command(name="approve")
+    async def cmd_approve(ctx, request_id: str = ""):
+        await _answer(ctx, request_id, True)
+
+    @bot.command(name="deny")
+    async def cmd_deny(ctx, request_id: str = ""):
+        await _answer(ctx, request_id, False)
+
+    @bot.command(name="trace")
+    async def cmd_trace(ctx, session_id: str = ""):
+        if not _allowed(ctx.channel.id, ctx.author.id):
+            return
+        sid = session_id or events.last_session_id("discord")
+        await ctx.send((events.format_session(sid, max_chars=1990) if sid else "No runs logged yet."))
+
     @bot.command(name="evolve")
     async def cmd_evolve(ctx, *, request: str = ""):
         if not _allowed(ctx.channel.id, ctx.author.id):
@@ -58,7 +91,7 @@ async def run() -> None:
             await ctx.send("Usage: `!evolve <what to improve>`")
             return
         msg = await ctx.send("Starting self-improvement cycle…")
-        result = await evolve(request, source="discord")
+        result = await evolve(request, source="discord", ask=_asker_for(ctx.channel), channel="discord")
         await msg.edit(content=result[:2000])
 
     @bot.command(name="memory")
@@ -109,7 +142,7 @@ async def run() -> None:
             return
 
         async with message.channel.typing():
-            response = await agent.run(text, source="discord")
+            response = await agent.run(text, source="discord", ask=_asker_for(message.channel), channel="discord")
         await message.reply(response[:2000])
 
     log.info("Discord bot starting")
