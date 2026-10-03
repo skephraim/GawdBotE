@@ -8,7 +8,7 @@ import asyncio
 import logging
 
 import config
-from core import agent, memory, voice
+from core import agent, memory, security, voice
 from core.self_evolve import evolve
 
 log = logging.getLogger(__name__)
@@ -19,6 +19,14 @@ async def run() -> None:
         log.info("Telegram bot token not set — interface disabled")
         return
 
+    if not config.TELEGRAM_ALLOWED_USERS:
+        log.error(
+            "Telegram bot NOT started: no allowed users. Set TELEGRAM_ALLOWED_USER_IDS to your numeric "
+            "Telegram user ID (message @userinfobot to find it). An empty list now means nobody, "
+            "because anyone who can message the bot could otherwise control this computer."
+        )
+        return
+
     try:
         from telegram import Update
         from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -27,15 +35,19 @@ async def run() -> None:
         return
 
     def _authorized(user_id: int) -> bool:
-        return config.TELEGRAM_USER_ID == 0 or user_id == config.TELEGRAM_USER_ID
+        return security.is_authorized(user_id, config.TELEGRAM_ALLOWED_USERS)
 
     async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not _authorized(update.effective_user.id):
+            return
         await update.message.reply_text(
             "GawdBotE online. I have full system access, voice control, web search, and self-improvement.\n"
             "Use /help to see commands."
         )
 
     async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not _authorized(update.effective_user.id):
+            return
         await update.message.reply_text(
             "/evolve <request> — trigger self-improvement\n"
             "/memory <query> — search persistent memory\n"

@@ -6,6 +6,9 @@ aiohttp>=3.9            # Async HTTP (webhooks, web search, GitHub API)
 # ── LLM providers (install what you use) ──────────────────────────────────────
 # anthropic>=0.27       # Anthropic Claude — uncomment if using anthropic provider
 
+# ── Secrets vault (stores API keys in the OS credential store) ────────────────
+keyring>=24.0
+
 # ── Interfaces ────────────────────────────────────────────────────────────────
 python-telegram-bot>=21.0   # Telegram
 # discord.py>=2.3       # Discord — uncomment if DISCORD_ENABLED=true
@@ -28,3 +31,6 @@ pyautogui>=0.9          # Mouse / keyboard control (requires display)
 
 # ── Cron scheduler ────────────────────────────────────────────────────────────
 croniter>=2.0           # Cron expression parsing
+
+# ── Development / tests (run: python -m pytest tests -v) ──────────────────────
+# pytest>=8.0

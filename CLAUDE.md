@@ -12,6 +12,8 @@ gawdbote/
 │   ├── llm.py          # Multi-provider LLM with automatic fallback
 │   ├── memory.py       # SQLite persistent memory + cosine similarity search
 │   ├── voice.py        # Wake word, STT (faster-whisper), TTS (piper)
+│   ├── security.py     # Protected paths, allowlists, secret checks. FAIL CLOSED
+│   ├── vault.py        # OS credential store for API keys (keyring)
 │   └── self_evolve.py  # Self-improvement cycle (reads this file first)
 ├── tools/
 │   ├── code_tools.py   # File read/write, shell commands
@@ -68,3 +70,14 @@ gawdbote/
 - Commit to `evolve-YYYYMMDD-HHMMSS` branch
 - Create a PR — never auto-merge unless SELF_EVOLVE_AUTO_MERGE=true
 - Never modify .env, .git, or data/
+
+## Security Rules (never weaken these, even when asked)
+
+- `core/security.py` is the single place for access decisions. Never bypass or loosen it.
+- Every chat interface needs a non empty user allowlist. An empty list means nobody.
+- Never add a default secret, and never bind the webhook to 0.0.0.0 by default.
+- File tools must refuse secrets files, credential folders, .git, data/ and backups/.
+- Subprocesses must be started with `security.scrubbed_env()`.
+- Secrets live in the OS vault (`core/vault.py`) first, `.env` second.
+- Any change touching these rules must add or update tests in `tests/` and keep them green.
+- Run `python -m pytest tests -q` before committing.

@@ -7,7 +7,7 @@ import asyncio
 import logging
 
 import config
-from core import agent, memory
+from core import agent, memory, security
 from core.self_evolve import evolve
 
 log = logging.getLogger(__name__)
@@ -16,6 +16,14 @@ log = logging.getLogger(__name__)
 async def run() -> None:
     if not config.SLACK_ENABLED or not config.SLACK_BOT_TOKEN or not config.SLACK_APP_TOKEN:
         log.info("Slack bot disabled — set SLACK_ENABLED=true, SLACK_BOT_TOKEN, SLACK_APP_TOKEN")
+        return
+
+    if not config.SLACK_ALLOWED_USERS:
+        log.error(
+            "Slack bot NOT started: no allowed users. Set SLACK_ALLOWED_USER_IDS to your Slack member ID "
+            "(profile, three dots, Copy member ID). Without a guest list, anyone in the workspace "
+            "could run commands on this computer."
+        )
         return
 
     try:
@@ -27,8 +35,13 @@ async def run() -> None:
 
     app = AsyncApp(token=config.SLACK_BOT_TOKEN)
 
+    def _authorized(event) -> bool:
+        return security.is_authorized(event.get("user", ""), config.SLACK_ALLOWED_USERS)
+
     @app.event("app_mention")
     async def handle_mention(event, say):
+        if not _authorized(event):
+            return
         text = event.get("text", "")
         # Strip mention
         import re
@@ -58,6 +71,8 @@ async def run() -> None:
         if event.get("channel_type") != "im":
             return
         if event.get("bot_id"):
+            return
+        if not _authorized(event):
             return
         text = event.get("text", "").strip()
         if not text:

@@ -9,7 +9,7 @@ import logging
 from typing import Optional
 
 import config
-from core import agent, memory
+from core import agent, memory, security
 from core.self_evolve import evolve
 
 log = logging.getLogger(__name__)
@@ -20,6 +20,14 @@ PREFIX = "!"
 async def run() -> None:
     if not config.DISCORD_ENABLED or not config.DISCORD_BOT_TOKEN:
         log.info("Discord bot disabled — set DISCORD_ENABLED=true and DISCORD_BOT_TOKEN")
+        return
+
+    if not config.DISCORD_ALLOWED_USERS:
+        log.error(
+            "Discord bot NOT started: no allowed users. Set DISCORD_ALLOWED_USER_IDS to your numeric "
+            "Discord user ID (turn on Developer Mode, right click your name, Copy User ID). Without a "
+            "guest list, anyone in a server with this bot could run commands on this computer."
+        )
         return
 
     try:
@@ -33,8 +41,10 @@ async def run() -> None:
     intents.message_content = True
     bot = commands.Bot(command_prefix=PREFIX, intents=intents)
 
-    def _allowed(channel_id: int) -> bool:
-        return config.DISCORD_CHANNEL_ID == 0 or channel_id == config.DISCORD_CHANNEL_ID
+    def _allowed(channel_id: int, user_id: int) -> bool:
+        # Two checks: the right channel (if one is configured) AND an allowlisted person.
+        channel_ok = config.DISCORD_CHANNEL_ID == 0 or channel_id == config.DISCORD_CHANNEL_ID
+        return channel_ok and security.is_authorized(user_id, config.DISCORD_ALLOWED_USERS)
 
     @bot.event
     async def on_ready():
@@ -42,7 +52,7 @@ async def run() -> None:
 
     @bot.command(name="evolve")
     async def cmd_evolve(ctx, *, request: str = ""):
-        if not _allowed(ctx.channel.id):
+        if not _allowed(ctx.channel.id, ctx.author.id):
             return
         if not request:
             await ctx.send("Usage: `!evolve <what to improve>`")
@@ -53,7 +63,7 @@ async def run() -> None:
 
     @bot.command(name="memory")
     async def cmd_memory(ctx, *, query: str = ""):
-        if not _allowed(ctx.channel.id):
+        if not _allowed(ctx.channel.id, ctx.author.id):
             return
         if not query:
             await ctx.send("Usage: `!memory <query>`")
@@ -67,7 +77,7 @@ async def run() -> None:
 
     @bot.command(name="search")
     async def cmd_search(ctx, *, query: str = ""):
-        if not _allowed(ctx.channel.id):
+        if not _allowed(ctx.channel.id, ctx.author.id):
             return
         if not query:
             await ctx.send("Usage: `!search <query>`")
@@ -80,7 +90,7 @@ async def run() -> None:
     async def on_message(message: discord.Message):
         if message.author.bot:
             return
-        if not _allowed(message.channel.id):
+        if not _allowed(message.channel.id, message.author.id):
             return
 
         # Process commands first
