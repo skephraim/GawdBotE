@@ -396,7 +396,7 @@ def test_both_methods_agreeing_ranks_highest(monkeypatch):
     run(memory.store("song budget notes", kind="note"))
     run(memory.store("Album cost estimate is high", kind="note"))
     top = run(memory.search("album cost"))[0]
-    assert top["content"].startswith("Album cost") and top["matched"] == "both"
+    assert top["content"].startswith("Album cost") and top["matched"] == "keyword+meaning"
 
 
 def test_vectors_from_different_models_are_never_compared(monkeypatch):

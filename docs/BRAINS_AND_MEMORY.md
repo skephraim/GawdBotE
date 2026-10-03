@@ -67,9 +67,43 @@ due in the next week, so GawdBot remembers without being asked.
 vectors from different models are never compared. After switching, run
 `python main.py memory reembed`.
 
+### The memory graph
+
+Memories are also connected to the **people, projects and things** they are about. Ideas
+adapted from [Graphify](https://github.com/Graphify-Labs/graphify) (MIT / Apache 2.0),
+rebuilt on the same SQLite file with no new dependencies.
+
+- When GawdBot saves a memory it lists who and what it is about (`about=["Dre", "Sid Vicious single"]`).
+  Any person or project it already knows is linked automatically when named later.
+- Links between things carry a name and an honesty label:
+  - **EXTRACTED**: both names appear in the memory that supports the link
+  - **INFERRED**: deduced, e.g. two things mentioned together, or a link with no supporting text
+  New evidence can upgrade INFERRED to EXTRACTED. Nothing ever downgrades it.
+- **Search gets a third voter.** From the best keyword and meaning matches, GawdBot follows
+  the graph to other memories about the same people and projects. That finds memories that
+  share no words with your question ("who is mixing the single?" also finds "his studio rate
+  is 150 an hour").
+- **Hubs are never stepping stones.** Something mentioned almost everywhere (like "Sun")
+  would connect everything to everything, so it is only used when the question names it.
+- New questions: "what do I know about Dre" (`memory_about`) and "how is Dre connected to
+  LearningMate" (`memory_connect`), with the evidence for every hop.
+- Forgetting a memory removes the links it alone supported, and anything left pointing at
+  nothing is cleaned up.
+
+Measured: 5,000 memories and 500 people and projects, about 5 ms to save and 15 ms to search
+(44 ms worst case), graph included.
+
+**Why not install Graphify itself?** It maps code and document folders and pulls in parsers
+for about 40 languages plus a graph library. Its own conversational memory benchmark shows
+plain hybrid search (what we already had) within 2 points of Graphify, with graph expansion
+adding a small edge. So we took the parts that create that edge. Graphify stays a good
+candidate later for mapping codebases and document folders, through its MCP server.
+
 ### Commands
 
 ```
+python main.py memory about <name>
+python main.py memory connect <a> -- <b>
 python main.py memory                    counts by kind, which models made the vectors
 python main.py memory search <words>
 python main.py memory upcoming [days]

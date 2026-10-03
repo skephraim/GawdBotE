@@ -12,6 +12,7 @@ gawdbote/
 │   ├── llm.py          # Provider adapters, chain fallback, circuit breaker, vision, embeddings
 │   ├── brains.py       # brains.toml: named brains, chains (main/vision/embedding), live swap
 │   ├── memory.py       # Kinds, FTS5 keyword + model tagged vector search, recall, migration
+│   ├── graph.py        # Memory graph: entities, mentions, relations, expansion, about/connect
 │   ├── voice.py        # Wake word, STT (faster-whisper), TTS (piper)
 │   ├── security.py     # Protected paths, allowlists, secret checks. FAIL CLOSED
 │   ├── vault.py        # OS credential store for API keys (keyring)
@@ -121,3 +122,6 @@ gawdbote/
 - Never delete `memories_legacy` or durable memories automatically. Only exchanges are pruned.
 - Memory failures must never break a run: recall and saving are wrapped and logged.
 - Do not save secrets, passwords, or other people's private details to memory.
+- Graph links are EXTRACTED only when both names appear in the supporting memory text. Never
+  mark a link EXTRACTED by assertion, and never let new evidence lower a confidence label.
+- Graph expansion must never walk through hub entities unless the question names them.

@@ -86,19 +86,21 @@ def _parse_due(due: Optional[str]) -> Optional[float]:
 
 
 @tool(risk=SAFE)
-async def memory_store(content: str, kind: MemoryKind = "fact", due: Optional[str] = None) -> str:
+async def memory_store(content: str, kind: MemoryKind = "fact", due: Optional[str] = None,
+                       about: Optional[list[str]] = None) -> str:
     """Save something to long term memory so you remember it in future conversations.
 
     Args:
-        content: One clear standalone statement, e.g. "Sun prefers plain prose with no dashes".
+        content: One clear standalone statement, e.g. "Dre is mixing the Sid Vicious single".
         kind: fact, preference, decision, deadline, task, or note.
         due: For deadlines and tasks, the due date as YYYY-MM-DD or YYYY-MM-DD HH:MM (local time).
+        about: Names of the people, projects, companies or places this is about, e.g. ["Dre", "Sid Vicious single"]. Use the same spelling every time.
     """
     try:
         due_ts = _parse_due(due)
     except ValueError:
         return f"Tool error: could not read the due date {due!r}. Use YYYY-MM-DD or YYYY-MM-DD HH:MM."
-    mid = await memory.store(content, kind=kind, due_ts=due_ts)
+    mid = await memory.store(content, kind=kind, due_ts=due_ts, about=about)
     return f"Saved as memory #{mid} ({kind})."
 
 
@@ -111,6 +113,44 @@ async def memory_search(query: str, kind: Optional[MemoryKind] = None) -> str:
         kind: Only search one kind of memory. Omit to search everything.
     """
     return memory.format_results(await memory.search(query, kinds=[kind] if kind else None))
+
+
+@tool(risk=SAFE)
+def memory_link(subject: str, relation: str, object: str, memory_id: Optional[int] = None) -> str:
+    """Record how two things relate, e.g. subject "Dre", relation "mixes", object "Sid Vicious single".
+
+    Args:
+        subject: The first person, project or thing.
+        relation: A short verb phrase: mixes, manages, works at, due for, owns.
+        object: The second person, project or thing.
+        memory_id: The memory that states this. The link is marked EXTRACTED only if both names appear in that memory; otherwise it is INFERRED.
+    """
+    try:
+        confidence = memory.link(subject, relation, object, memory_id)
+    except ValueError as exc:
+        return f"Tool error: {exc}"
+    return f"Linked: {subject} {relation} {object} [{confidence}]."
+
+
+@tool(risk=SAFE)
+def memory_about(name: str) -> str:
+    """Everything memory holds about one person, project or thing: its links, who it is mentioned with, and the memories about it.
+
+    Args:
+        name: The person, project or thing.
+    """
+    return memory.about_text(name)
+
+
+@tool(risk=SAFE)
+def memory_connect(a: str, b: str) -> str:
+    """Trace how two people, projects or things are connected in memory, hop by hop, with the evidence for each hop.
+
+    Args:
+        a: The first person, project or thing.
+        b: The second person, project or thing.
+    """
+    return memory.connect_text(a, b)
 
 
 @tool(risk=SAFE)
