@@ -123,6 +123,18 @@ APPROVAL_OWNER_CHANNEL = os.getenv("APPROVAL_OWNER_CHANNEL", "telegram").strip()
 # run_command: it lets the agent do anything you can do on this computer without asking.
 TRUSTED_TOOLS = {t.strip() for t in os.getenv("TRUSTED_TOOLS", "").split(",") if t.strip()}
 
+# ── Paperclip (GawdBot as an employee in a Paperclip company) ─────────────────
+# Off by default. When on, the webhook server accepts heartbeats at /paperclip/heartbeat.
+PAPERCLIP_ENABLED = os.getenv("PAPERCLIP_ENABLED", "false").lower() == "true"
+# The run token is only ever sent to these hosts. Paperclip runs locally by default.
+PAPERCLIP_ALLOWED_HOSTS = {
+    h.strip().lower() for h in os.getenv("PAPERCLIP_ALLOWED_HOSTS", "localhost,127.0.0.1,::1").split(",") if h.strip()
+}
+PAPERCLIP_MAX_ROUNDS = int(os.getenv("PAPERCLIP_MAX_ROUNDS", "20"))
+# How long `python main.py heartbeat` waits for the running GawdBot to finish a task.
+# Set Paperclip's timeoutSec for this agent a little higher than this.
+PAPERCLIP_HEARTBEAT_TIMEOUT_SECONDS = int(os.getenv("PAPERCLIP_HEARTBEAT_TIMEOUT_SECONDS", "1800"))
+
 # ── Web search ─────────────────────────────────────────────────────────────────
 WEB_SEARCH_PROVIDER = os.getenv("WEB_SEARCH_PROVIDER", "duckduckgo")  # duckduckgo | brave
 BRAVE_API_KEY = _secret("BRAVE_API_KEY")

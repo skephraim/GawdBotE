@@ -44,6 +44,24 @@ async def run() -> None:
         log.error("aiohttp not installed. Run: pip install aiohttp")
         return
 
+    app = build_app()
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, config.WEBHOOK_HOST, config.WEBHOOK_PORT)
+    await site.start()
+    log.info("Webhook server listening on %s:%d", config.WEBHOOK_HOST, config.WEBHOOK_PORT)
+
+    import asyncio
+    try:
+        await asyncio.Event().wait()
+    finally:
+        await runner.cleanup()
+
+
+def build_app():
+    """Build the web app with every route. Separate from run() so tests can serve it on a spare port."""
+    from aiohttp import web
+
     def _auth(request) -> bool:
         secret = request.headers.get("X-Webhook-Secret", "")
         return security.constant_time_equal(secret, config.WEBHOOK_SECRET)
@@ -111,21 +129,29 @@ async def run() -> None:
         result = await search(query, max_results=body.get("max_results", 5))
         return web.json_response({"result": result})
 
+    async def paperclip_heartbeat(request):
+        """
+        Paperclip wakes GawdBot here (via `python main.py heartbeat`). Running the work in THIS
+        long lived process means risky actions can still reach the owner on Telegram for approval.
+        """
+        if not config.PAPERCLIP_ENABLED:
+            return web.json_response({"error": "Paperclip integration is disabled"}, status=404)
+        if not _auth(request):
+            return web.json_response({"error": "Unauthorized"}, status=401)
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "Invalid JSON"}, status=400)
+        from core import paperclip
+        env = paperclip.HeartbeatEnv.from_mapping(body.get("env") or {})
+        result = await paperclip.run_heartbeat(env)
+        return web.json_response(result.as_dict(), status=200 if result.ok else 502)
+
     app = web.Application()
     app.router.add_get("/health", health)
+    app.router.add_post("/paperclip/heartbeat", paperclip_heartbeat)
     app.router.add_post("/webhook", webhook)
     app.router.add_post("/webhook/embed", webhook_embed)
     app.router.add_post("/webhook/evolve", webhook_evolve)
     app.router.add_post("/webhook/search", webhook_search)
-
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, config.WEBHOOK_HOST, config.WEBHOOK_PORT)
-    await site.start()
-    log.info("Webhook server listening on %s:%d", config.WEBHOOK_HOST, config.WEBHOOK_PORT)
-
-    import asyncio
-    try:
-        await asyncio.Event().wait()
-    finally:
-        await runner.cleanup()
+    return app

@@ -335,3 +335,8 @@ def skill_update(name: str = "", force: bool = False) -> str:
         force: Overwrite local changes.
     """
     return skills_mod.update_skill(name, force)
+
+
+# ── Integrations ───────────────────────────────────────────────────────────────
+# Importing registers their tools. Each is inert unless its integration is in use.
+from tools import paperclip_tools  # noqa: E402,F401

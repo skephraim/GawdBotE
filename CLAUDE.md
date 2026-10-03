@@ -18,9 +18,11 @@ gawdbote/
 │   ├── approvals.py    # Approval gate for ASK tier tools (deny on silence)
 │   ├── events.py       # Append only SQLite audit trail of every run
 │   ├── context.py      # RunContext: session id, channel, how to ask the owner
+│   ├── paperclip.py    # Paperclip employee: heartbeat procedure + API client
 │   └── self_evolve.py  # Self-improvement cycle (reads this file first)
 ├── tools/
 │   ├── builtin.py      # EVERY agent tool is registered here with @tool
+│   ├── paperclip_tools.py # Tools for the Paperclip task in progress (imported by builtin)
 │   ├── code_tools.py   # File read/write, shell commands
 │   ├── git_tools.py    # Git operations + GitHub PR creation
 │   ├── pc_control.py   # Mouse, keyboard, clipboard, screenshots, windows
@@ -72,6 +74,17 @@ gawdbote/
 - Never call `registry.call()` or `agent._dispatch()` directly to skip approval.
 - Every run writes its steps to `data/events.db`. View with `python main.py log`.
 - `TRUSTED_TOOLS` skips approval for listed tools. Never add tools to it on your own.
+
+## Paperclip Integration (docs/PAPERCLIP.md)
+
+- Paperclip wakes GawdBot via `python main.py heartbeat`, which forwards to the running
+  daemon at `/paperclip/heartbeat` so approvals still reach the owner.
+- Follow the heartbeat protocol: always check out before working, NEVER retry a 409,
+  always leave a comment before exiting.
+- The run token (`PAPERCLIP_API_KEY`) is never logged, printed, stored, or sent to a host
+  outside `PAPERCLIP_ALLOWED_HOSTS`.
+- One deliberate SAFE exception: `paperclip_comment` and `paperclip_finish` write to the one
+  task this run checked out. Anything that assigns work to other agents is ASK.
 
 ## Adding a New Interface
 
