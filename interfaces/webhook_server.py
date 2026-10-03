@@ -92,13 +92,16 @@ def build_app():
         except Exception:
             return web.json_response({"error": "Invalid JSON"}, status=400)
 
-        if "texts" in body:
-            import asyncio
-            embeddings = await asyncio.gather(*[memory._embed(t) for t in body["texts"]])
-            return web.json_response({"embeddings": embeddings})
-        elif "text" in body:
-            emb = await memory._embed(body["text"])
-            return web.json_response({"embedding": emb})
+        texts = body.get("texts") or ([body["text"]] if "text" in body else None)
+        if texts:
+            from core import llm
+            result = await llm.embed(list(texts), "passage")
+            if not result:
+                return web.json_response({"error": "No embedding brain is available"}, status=503)
+            vectors, model = result
+            if "texts" in body:
+                return web.json_response({"embeddings": vectors, "model": model})
+            return web.json_response({"embedding": vectors[0], "model": model})
         else:
             return web.json_response({"error": "Missing 'text' or 'texts'"}, status=400)
 

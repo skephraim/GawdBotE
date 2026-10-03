@@ -27,7 +27,9 @@ from __future__ import annotations
 
 import contextvars
 import logging
+import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Mapping, Optional
 from urllib.parse import urlparse
 
@@ -160,6 +162,9 @@ class PaperclipClient:
     async def update(self, issue_id: str, status: str, comment: str) -> Any:
         return await self._request("PATCH", f"/issues/{issue_id}", json={"status": status, "comment": comment})
 
+    async def report_cost(self, company_id: str, event: dict) -> Any:
+        return await self._request("POST", f"/companies/{company_id}/cost-events", json=event)
+
     async def create_issue(self, company_id: str, **fields: Any) -> Any:
         return await self._request("POST", f"/companies/{company_id}/issues",
                                    json={k: v for k, v in fields.items() if v not in (None, "")})
@@ -272,6 +277,70 @@ def build_brief(issue: dict, comments: list[dict], agent: dict, env: HeartbeatEn
     return "\n".join(lines)
 
 
+# ── Cost reporting ─────────────────────────────────────────────────────────────
+
+_GUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+
+
+def _guid(value: Any) -> Optional[str]:
+    v = str(value or "")
+    return v if _GUID_RE.match(v) else None
+
+
+def build_cost_events(usage_rows: list[dict], agent_id: str, issue_id: str, run_id: str) -> list[dict]:
+    """
+    Turn this run's usage into Paperclip cost events. Shapes follow Paperclip's SERVER
+    validator (packages/shared/src/validators/cost.ts), which is stricter than its docs:
+    ids must be GUIDs and occurredAt is required. Unknown prices are reported honestly as
+    costStatus "unpriced" with 0 cents, never guessed.
+    """
+    agent = _guid(agent_id)
+    if not agent:
+        return []
+    now = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    out = []
+    for r in usage_rows:
+        if not (r["input_tokens"] or r["output_tokens"]):
+            continue
+        priced = r["cost_usd"] is not None and not r["unpriced_calls"]
+        event = {
+            "agentId": agent,
+            "provider": r["provider"] if r["provider"] != "?" else r["brain"],
+            "model": r["model"],
+            "inputTokens": int(r["input_tokens"]),
+            "cachedInputTokens": int(r["cached_input_tokens"]),
+            "outputTokens": int(r["output_tokens"]),
+            "costCents": int(round((r["cost_usd"] or 0) * 100)) if priced else 0,
+            "costStatus": "reported" if priced else "unpriced",
+            "billingType": "metered_api" if r["provider"] != "local" else "fixed",
+            "occurredAt": now,
+        }
+        if _guid(issue_id):
+            event["issueId"] = issue_id
+        if _guid(run_id):
+            event["heartbeatRunId"] = run_id
+        out.append(event)
+    return out
+
+
+async def _report_costs(pc: "PaperclipClient", ctx: RunContext, env: HeartbeatEnv,
+                        agent_id: str, company_id: str, issue_id: str) -> None:
+    """Send this run's spend to Paperclip so its budgets see it. Never fails the heartbeat."""
+    try:
+        cost_events = build_cost_events(events.session_usage(ctx.session_id), agent_id, issue_id, env.run_id)
+        if not cost_events:
+            events.record(ctx, "heartbeat", status="cost_skipped",
+                          reason="no usage, or agent id is not a GUID")
+            return
+        for ev in cost_events:
+            await pc.report_cost(company_id, ev)
+        events.record(ctx, "heartbeat", status="cost_reported", count=len(cost_events),
+                      cents=sum(e["costCents"] for e in cost_events))
+    except Exception as exc:
+        log.warning("Could not report cost to Paperclip: %s", exc)
+        events.record(ctx, "heartbeat", status="cost_error", error=str(exc))
+
+
 # ── The heartbeat ──────────────────────────────────────────────────────────────
 
 @dataclass
@@ -338,6 +407,7 @@ async def run_heartbeat(env: HeartbeatEnv, ask: Optional[Asker] = None, session=
                                         max_rounds=config.PAPERCLIP_MAX_ROUNDS, ctx=ctx)
             finally:
                 current_task.reset(token)
+                await _report_costs(pc, ctx, env, agent_id, company_id, issue_id)
 
             if task.finished:
                 return HeartbeatResult("finished", f"Reported {task.finished}.", issue_id, ctx.session_id)

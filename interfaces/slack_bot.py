@@ -55,8 +55,8 @@ async def run() -> None:
             if not results:
                 await say("No memories found.")
             else:
-                lines = [f"[{r['score']:.2f}] {r['content'][:200]}" for r in results]
-                await say("\n\n".join(lines)[:3000])
+                text = memory.format_results(results)
+                await say(text[:3000])
         elif text.startswith("search "):
             from tools.web_search import search
             result = await search(text[7:])

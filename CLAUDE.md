@@ -9,8 +9,9 @@ This file is read by the agent before any self-evolution task.
 gawdbote/
 ├── core/
 │   ├── agent.py        # Agentic loop — dispatches tool calls, calls LLM
-│   ├── llm.py          # Multi-provider LLM with automatic fallback
-│   ├── memory.py       # SQLite persistent memory + cosine similarity search
+│   ├── llm.py          # Provider adapters, chain fallback, circuit breaker, vision, embeddings
+│   ├── brains.py       # brains.toml: named brains, chains (main/vision/embedding), live swap
+│   ├── memory.py       # Kinds, FTS5 keyword + model tagged vector search, recall, migration
 │   ├── voice.py        # Wake word, STT (faster-whisper), TTS (piper)
 │   ├── security.py     # Protected paths, allowlists, secret checks. FAIL CLOSED
 │   ├── vault.py        # OS credential store for API keys (keyring)
@@ -51,8 +52,8 @@ gawdbote/
 ## Key Design Decisions
 
 - **Python 3.11+** — async throughout (`asyncio.gather` for parallel tool calls)
-- **Multi-provider LLM fallback** — providers in `LLM_PROVIDERS` tried in order
-- **No external vector DB** — SQLite + cosine similarity for memory
+- **Brains** — `brains.toml` defines named brains and chains; `.env` settings are the fallback
+- **No external vector DB** — SQLite FTS5 keyword search plus model tagged vectors, blended
 - **OpenAI-compat API** — NVIDIA NIM, Ollama, OpenAI, OpenRouter all share the same client
 - **All interfaces run concurrently** via `asyncio.gather` in `main.py`
 - **Tool calls run in parallel** within the agent loop
@@ -111,3 +112,12 @@ gawdbote/
 - Secrets live in the OS vault (`core/vault.py`) first, `.env` second.
 - Any change touching these rules must add or update tests in `tests/` and keep them green.
 - Run `python -m pytest tests -q` before committing.
+
+## Brains and Memory Rules (docs/BRAINS_AND_MEMORY.md)
+
+- `brains.toml` holds secret NAMES only. Never write a real key into it or any other file.
+- Never invent model prices. Unknown prices stay blank and are reported as unknown.
+- Never compare vectors from different embedding models; every vector carries `embed_model`.
+- Never delete `memories_legacy` or durable memories automatically. Only exchanges are pruned.
+- Memory failures must never break a run: recall and saving are wrapped and logged.
+- Do not save secrets, passwords, or other people's private details to memory.

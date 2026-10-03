@@ -31,6 +31,7 @@ class FakePaperclip:
         self.fail_me = fail_me
         self.comments: dict[str, list[dict]] = {i: [] for i in self.issues}
         self.created: list[dict] = []
+        self.costs: list[dict] = []
         self.requests: list[dict] = []
 
     def app(self) -> web.Application:
@@ -48,6 +49,7 @@ class FakePaperclip:
         a.router.add_get("/api/agents/me", self.get_me)
         a.router.add_get("/api/companies/{cid}/issues", self.list_issues)
         a.router.add_post("/api/companies/{cid}/issues", self.create_issue)
+        a.router.add_post("/api/companies/{cid}/cost-events", self.cost_event)
         a.router.add_post("/api/issues/{id}/checkout", self.checkout)
         a.router.add_get("/api/issues/{id}", self.get_issue)
         a.router.add_patch("/api/issues/{id}", self.patch_issue)
@@ -89,6 +91,35 @@ class FakePaperclip:
         self.comments[r.match_info["id"]].append({"id": f"c{len(self.comments[r.match_info['id']])}", **body})
         return web.json_response({"ok": True}, status=201)
 
+    async def cost_event(self, r):
+        """Mirror Paperclip's server validator (validators/cost.ts), which is stricter than its docs."""
+        import re
+        from datetime import datetime
+        body = await r.json()
+        guid = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+        problems = []
+        if not guid.match(str(body.get("agentId", ""))):
+            problems.append("agentId must be a guid")
+        for opt in ("issueId", "heartbeatRunId"):
+            if opt in body and not guid.match(str(body[opt])):
+                problems.append(f"{opt} must be a guid")
+        if not body.get("provider") or not body.get("model"):
+            problems.append("provider and model are required")
+        if not isinstance(body.get("costCents"), int) or body["costCents"] < 0:
+            problems.append("costCents must be a non negative integer")
+        if body.get("costStatus", "reported") not in ("reported", "unpriced"):
+            problems.append("bad costStatus")
+        try:
+            datetime.fromisoformat(body["occurredAt"].replace("Z", "+00:00"))
+        except Exception:
+            problems.append("occurredAt must be an ISO datetime")
+        if body.get("agentId") != self.me["id"]:
+            return web.json_response({"error": "Agent can only report its own costs"}, status=403)
+        if problems:
+            return web.json_response({"error": problems}, status=400)
+        self.costs.append(body)
+        return web.json_response({"id": f"cost-{len(self.costs)}"}, status=201)
+
     async def create_issue(self, r):
         body = await r.json()
         self.created.append(body)
@@ -111,7 +142,7 @@ def issue(iid, status="todo", **extra):
 
 
 def env_for(port, **extra) -> paperclip.HeartbeatEnv:
-    return paperclip.HeartbeatEnv(api_url=f"http://127.0.0.1:{port}", api_key=TOKEN, run_id=RUN_ID, **extra)
+    return paperclip.HeartbeatEnv(api_url=f"http://127.0.0.1:{port}", api_key=TOKEN, **{"run_id": RUN_ID, **extra})
 
 
 # ── Fake brain ─────────────────────────────────────────────────────────────────

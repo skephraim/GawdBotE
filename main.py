@@ -29,6 +29,15 @@ async def main() -> None:
     from scheduler import cron
     from core import voice, agent
 
+    # Housekeeping: drop raw chat exchanges past their keep date. Saved facts are never touched.
+    try:
+        from core import memory
+        pruned = memory.prune_exchanges()
+        if pruned:
+            log.info("Memory: pruned %d old chat exchanges", pruned)
+    except Exception as exc:
+        log.warning("Memory prune skipped: %s", exc)
+
     tasks = []
 
     # ── Telegram ──────────────────────────────────────────────────────────────
@@ -106,6 +115,9 @@ if __name__ == "__main__":
         elif cmd == "secrets":
             from cli.secrets_cli import main as secrets_main
             secrets_main(sys.argv[2:])
+        elif cmd in ("brain", "memory", "usage"):
+            from cli import brain_memory_cli as bm
+            {"brain": bm.brain_main, "memory": bm.memory_main, "usage": bm.usage_main}[cmd](sys.argv[2:])
         elif cmd == "heartbeat":
             from cli.heartbeat import main as heartbeat_main
             heartbeat_main()
@@ -123,7 +135,7 @@ if __name__ == "__main__":
                     answer = await asyncio.to_thread(input, "Approve? [y/N]: ")
                     approvals.resolve(req.id, answer.strip().lower() in ("y", "yes"), by="cli", channel="cli")
 
-                print("GawdBotE interactive chat (Ctrl+C to exit, /trace shows the last run)\n")
+                print("GawdBotE interactive chat (Ctrl+C to exit). Commands: /trace, /brain, /usage\n")
                 history = []
                 while True:
                     try:
@@ -132,6 +144,13 @@ if __name__ == "__main__":
                         print("\nBye!")
                         break
                     if not user_input:
+                        continue
+                    if user_input.startswith("/brain"):
+                        from core import brains
+                        print(brains.handle_command(user_input.split()[1:]) + "\n")
+                        continue
+                    if user_input == "/usage":
+                        print(events.format_usage(events.usage_summary(30), "Brain usage, last 30 days:") + "\n")
                         continue
                     if user_input == "/trace":
                         sid = events.last_session_id("cli")
@@ -144,6 +163,6 @@ if __name__ == "__main__":
             asyncio.run(cli_chat())
         else:
             print(f"Unknown command: {cmd}")
-            print("Commands: doctor, backup, chat, secrets, log, heartbeat")
+            print("Commands: doctor, backup, chat, secrets, log, heartbeat, brain, memory, usage")
     else:
         asyncio.run(main())

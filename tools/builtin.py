@@ -74,28 +74,63 @@ def list_project_files() -> str:
 
 # ── Memory ─────────────────────────────────────────────────────────────────────
 
+MemoryKind = Literal["fact", "preference", "decision", "deadline", "task", "note"]
+
+
+def _parse_due(due: Optional[str]) -> Optional[float]:
+    """'2026-10-15' or '2026-10-15 17:00' in local time, to a timestamp. Raises ValueError if unreadable."""
+    if not due:
+        return None
+    from datetime import datetime
+    return datetime.fromisoformat(due.strip().replace("T", " ")).timestamp()
+
+
 @tool(risk=SAFE)
-async def memory_store(content: str) -> str:
-    """Save a piece of information to long term memory.
+async def memory_store(content: str, kind: MemoryKind = "fact", due: Optional[str] = None) -> str:
+    """Save something to long term memory so you remember it in future conversations.
 
     Args:
-        content: The information to remember, written as a clear standalone fact.
+        content: One clear standalone statement, e.g. "Sun prefers plain prose with no dashes".
+        kind: fact, preference, decision, deadline, task, or note.
+        due: For deadlines and tasks, the due date as YYYY-MM-DD or YYYY-MM-DD HH:MM (local time).
     """
-    mid = await memory.store(content)
-    return f"Stored as memory #{mid}."
+    try:
+        due_ts = _parse_due(due)
+    except ValueError:
+        return f"Tool error: could not read the due date {due!r}. Use YYYY-MM-DD or YYYY-MM-DD HH:MM."
+    mid = await memory.store(content, kind=kind, due_ts=due_ts)
+    return f"Saved as memory #{mid} ({kind})."
 
 
 @tool(risk=SAFE)
-async def memory_search(query: str) -> str:
-    """Search long term memory for relevant information.
+async def memory_search(query: str, kind: Optional[MemoryKind] = None) -> str:
+    """Search long term memory by keywords and meaning.
 
     Args:
         query: What to look for.
+        kind: Only search one kind of memory. Omit to search everything.
     """
-    results = await memory.search(query)
-    if not results:
-        return "No relevant memories found."
-    return "\n".join(f"[{r['score']:.2f}] {r['content']}" for r in results)
+    return memory.format_results(await memory.search(query, kinds=[kind] if kind else None))
+
+
+@tool(risk=SAFE)
+def memory_upcoming(days: int = 7) -> str:
+    """List remembered deadlines and tasks due soon, plus anything overdue.
+
+    Args:
+        days: How many days ahead to look.
+    """
+    return memory.format_results(memory.upcoming(days))
+
+
+@tool(risk=ASK)
+def memory_forget(memory_id: int) -> str:
+    """Permanently delete one memory by its number. Needs approval.
+
+    Args:
+        memory_id: The memory number shown as #id in search results.
+    """
+    return f"Memory #{memory_id} deleted." if memory.forget(memory_id) else f"No memory #{memory_id}."
 
 
 # ── Web ────────────────────────────────────────────────────────────────────────
