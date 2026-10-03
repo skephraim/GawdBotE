@@ -43,7 +43,12 @@ def test_symlink_to_env_is_caught(tmp_path):
     real = tmp_path / ".env"
     real.write_text("API_KEY=abc")
     link = tmp_path / "harmless.txt"
-    link.symlink_to(real)
+    try:
+        link.symlink_to(real)
+    except OSError:
+        # Windows only allows symlinks with Developer Mode or admin rights. That is a
+        # limit of the test machine, not a failure of the protection, so skip clearly.
+        pytest.skip("this machine does not allow creating symlinks (Windows: turn on Developer Mode to run this test)")
     assert security.protected_reason(link) is not None
 
 
