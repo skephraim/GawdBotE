@@ -492,9 +492,16 @@ async def run(
         tool_tasks = []
         for tc in resp["tool_calls"]:
             try:
-                args = json.loads(tc["arguments"])
-            except json.JSONDecodeError:
-                args = {}
+                args = json.loads(tc["arguments"] or "{}")
+                if not isinstance(args, dict):
+                    raise ValueError("arguments must be a JSON object")
+            except (json.JSONDecodeError, ValueError) as exc:
+                # Do NOT quietly run the tool with empty arguments. Tell the model what went
+                # wrong so it can retry with valid arguments.
+                async def _bad_args(err=exc, tool=tc["name"]) -> str:
+                    return f"Tool error: the arguments for {tool} were not valid JSON ({err}). Retry the call."
+                tool_tasks.append((tc["id"], tc["name"], _bad_args()))
+                continue
             tool_tasks.append((tc["id"], tc["name"], _dispatch(tc["name"], args)))
 
         results = await asyncio.gather(*[t[2] for t in tool_tasks], return_exceptions=True)

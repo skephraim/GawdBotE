@@ -5,6 +5,7 @@ Supports: nvidia, ollama, openai, anthropic, openrouter
 """
 from __future__ import annotations
 import asyncio
+import json
 import logging
 from typing import Optional
 
@@ -88,6 +89,68 @@ async def _call_openai_compat(
     }
 
 
+def _to_anthropic_messages(messages: list[dict]) -> list[dict]:
+    """
+    Translate the agent's internal (OpenAI shaped) messages into Anthropic's format.
+
+    The two APIs describe a tool call differently:
+      OpenAI:    assistant message with "tool_calls", then a message with role "tool"
+      Anthropic: assistant message with "tool_use" blocks, then a USER message holding
+                 "tool_result" blocks
+
+    Think of it as translating a lab order between two EHR systems: same clinical
+    meaning, different message layout. System messages are skipped because Anthropic
+    takes the system prompt as a separate field. Neighboring messages from the same role
+    are merged, since Anthropic wants roles to alternate.
+    """
+    out: list[dict] = []
+
+    def push(role: str, blocks: list[dict]) -> None:
+        if not blocks:
+            return
+        if out and out[-1]["role"] == role:
+            out[-1]["content"].extend(blocks)
+        else:
+            out.append({"role": role, "content": list(blocks)})
+
+    for m in messages:
+        role = m.get("role")
+        if role == "system":
+            continue
+
+        if role == "tool":
+            push("user", [{
+                "type": "tool_result",
+                "tool_use_id": m["tool_call_id"],
+                "content": str(m.get("content", "")),
+            }])
+
+        elif role == "assistant":
+            blocks: list[dict] = []
+            if m.get("content"):
+                blocks.append({"type": "text", "text": m["content"]})
+            for tc in m.get("tool_calls") or []:
+                fn = tc["function"]
+                try:
+                    args = json.loads(fn.get("arguments") or "{}")
+                except json.JSONDecodeError:
+                    args = {}
+                blocks.append({"type": "tool_use", "id": tc["id"], "name": fn["name"], "input": args})
+            push("assistant", blocks)
+
+        elif role == "user":
+            content = m.get("content", "")
+            if isinstance(content, list):
+                blocks = content
+            elif content:
+                blocks = [{"type": "text", "text": str(content)}]
+            else:
+                blocks = []
+            push("user", blocks)
+
+    return out
+
+
 async def _call_anthropic(
     messages: list[dict],
     tools: Optional[list] = None,
@@ -110,7 +173,7 @@ async def _call_anthropic(
                 "input_schema": fn.get("parameters", {"type": "object", "properties": {}}),
             })
 
-    params: dict = dict(model=model, messages=messages, max_tokens=4096)
+    params: dict = dict(model=model, messages=_to_anthropic_messages(messages), max_tokens=4096)
     if system:
         params["system"] = system
     if ant_tools:
@@ -118,9 +181,11 @@ async def _call_anthropic(
 
     resp = await client.messages.create(**params)
 
-    text_parts = [b.text for b in resp.content if hasattr(b, "text")]
+    text_parts = [b.text for b in resp.content if b.type == "text"]
     tool_calls = [
-        {"id": b.id, "name": b.name, "arguments": str(b.input)}
+        # json.dumps gives real JSON. The old str(b.input) gave a Python dict string with
+        # single quotes, which json.loads rejects, so every tool call silently got empty arguments.
+        {"id": b.id, "name": b.name, "arguments": json.dumps(b.input)}
         for b in resp.content
         if b.type == "tool_use"
     ]

@@ -12,7 +12,7 @@ import json
 import logging
 
 import config
-from core import agent, memory
+from core import agent, memory, security
 from core.self_evolve import evolve
 
 log = logging.getLogger(__name__)
@@ -23,6 +23,21 @@ async def run() -> None:
         log.info("Webhook server disabled")
         return
 
+    # SECURITY: /webhook runs the full agent, shell included. Never start it with a missing,
+    # default, or short secret. Fail closed and tell the owner exactly how to fix it.
+    if security.secret_is_weak(config.WEBHOOK_SECRET):
+        log.error(
+            "Webhook server NOT started: WEBHOOK_SECRET is missing, a default value, or under 16 characters. "
+            "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\" "
+            "then store it with: python main.py secrets set WEBHOOK_SECRET"
+        )
+        return
+    if config.WEBHOOK_HOST not in ("127.0.0.1", "localhost", "::1"):
+        log.warning(
+            "Webhook is listening on %s, which other machines can reach. Put HTTPS in front of it "
+            "or set WEBHOOK_HOST=127.0.0.1.", config.WEBHOOK_HOST,
+        )
+
     try:
         from aiohttp import web
     except ImportError:
@@ -31,7 +46,7 @@ async def run() -> None:
 
     def _auth(request) -> bool:
         secret = request.headers.get("X-Webhook-Secret", "")
-        return secret == config.WEBHOOK_SECRET
+        return security.constant_time_equal(secret, config.WEBHOOK_SECRET)
 
     async def health(request):
         return web.json_response({"status": "ok", "service": "gawdbote"})
