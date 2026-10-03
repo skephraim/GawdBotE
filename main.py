@@ -106,6 +106,9 @@ if __name__ == "__main__":
         elif cmd == "secrets":
             from cli.secrets_cli import main as secrets_main
             secrets_main(sys.argv[2:])
+        elif cmd == "heartbeat":
+            from cli.heartbeat import main as heartbeat_main
+            heartbeat_main()
         elif cmd == "log":
             from cli.log_cli import main as log_main
             log_main(sys.argv[2:])
@@ -141,6 +144,6 @@ if __name__ == "__main__":
             asyncio.run(cli_chat())
         else:
             print(f"Unknown command: {cmd}")
-            print("Commands: doctor, backup, chat, secrets, log")
+            print("Commands: doctor, backup, chat, secrets, log, heartbeat")
     else:
         asyncio.run(main())
