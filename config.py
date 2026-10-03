@@ -73,6 +73,12 @@ OPENROUTER_API_KEY = _secret("OPENROUTER_API_KEY")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct")
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
+# ── Brains (see brains.example.toml) ───────────────────────────────────────────
+# If brains.toml exists it decides which models run and in what order. If not, the
+# provider settings above are used, exactly as before.
+BRAINS_FILE = os.getenv("BRAINS_FILE", str(PROJECT_ROOT / "brains.toml"))
+BRAIN_STATE_FILE = os.getenv("BRAIN_STATE_FILE", str(PROJECT_ROOT / "data" / "brain_state.json"))
+
 # ── Voice ──────────────────────────────────────────────────────────────────────
 WAKE_WORD = os.getenv("WAKE_WORD", "hey jarvis")
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")
@@ -86,6 +92,14 @@ VOICE_ENABLED = os.getenv("VOICE_ENABLED", "true").lower() == "true"
 # ── Memory ─────────────────────────────────────────────────────────────────────
 MEMORY_DB = os.getenv("MEMORY_DB", str(PROJECT_ROOT / "data" / "memory.db"))
 MEMORY_MAX_RESULTS = int(os.getenv("MEMORY_MAX_RESULTS", "5"))
+# How many relevant memories are handed to the agent at the start of every run (0 = off).
+MEMORY_RECALL_K = int(os.getenv("MEMORY_RECALL_K", "4"))
+# Raw chat exchanges are kept this many days. Facts, preferences, decisions, deadlines and
+# tasks are kept until you delete them.
+MEMORY_EXCHANGE_DAYS = int(os.getenv("MEMORY_EXCHANGE_DAYS", "90"))
+# Embedding every chat exchange costs an API call per message. Off by default: exchanges are
+# still found by keyword search. Saved facts are always embedded when an embedder is available.
+MEMORY_EMBED_EXCHANGES = os.getenv("MEMORY_EMBED_EXCHANGES", "false").lower() == "true"
 
 # ── Interfaces ─────────────────────────────────────────────────────────────────
 # SECURITY: every chat interface gives the sender the power to run the agent, which

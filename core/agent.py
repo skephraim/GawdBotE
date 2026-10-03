@@ -29,7 +29,9 @@ Capabilities:
 - Git & GitHub: commit, branch, push, create PRs
 - PC control: mouse, keyboard, screen, open apps, clipboard
 - Web search: search the internet for current information
-- Memory: store and recall information persistently
+- Memory: store and recall information persistently. Save durable things with memory_store and
+  the right kind (fact, preference, decision, deadline with a due date, task, note). Do not save
+  secrets, passwords, or other people's private details.
 - Self-improvement: read and edit your own source code
 
 Approvals:
@@ -115,9 +117,19 @@ async def run(
     messages.append({"role": "user", "content": user_message})
 
     skill_context = skills_mod.build_skill_context(user_message)
-    effective_system = SYSTEM_PROMPT + skill_context if skill_context else SYSTEM_PROMPT
+
+    # Hand the agent what it already knows: relevant saved memories and upcoming deadlines.
+    # A memory failure must never stop the run, so any error just means "no recall this time".
+    try:
+        recalled = await memory.recall(user_message)
+    except Exception as exc:
+        log.warning("Memory recall failed: %s", exc)
+        recalled = []
+
+    effective_system = SYSTEM_PROMPT + (skill_context or "") + memory.format_for_prompt(recalled)
     events.record(ctx, "run_start", message=user_message, source=source,
-                  skills=[s.name for s in skills_mod.find_relevant(user_message)] if skill_context else [])
+                  skills=[s.name for s in skills_mod.find_relevant(user_message)] if skill_context else [],
+                  recalled=[r["id"] for r in recalled])
 
     specs = tool_specs()
     for round_num in range(1, max_rounds + 1):
@@ -127,13 +139,22 @@ async def run(
             events.record(ctx, "run_end", status="error", rounds=round_num, final=f"LLM failure: {exc}")
             raise
 
+        usage = resp.get("usage") or {}
         events.record(ctx, "llm_reply", provider=resp.get("provider"), round=round_num,
+                      brain=resp.get("brain"), model=resp.get("model"), provider_name=resp.get("provider_name"),
+                      input_tokens=usage.get("input_tokens", 0), output_tokens=usage.get("output_tokens", 0),
+                      cached_input_tokens=usage.get("cached_input_tokens", 0), cost_usd=resp.get("cost_usd"),
+                      fallbacks=resp.get("fallbacks") or [],
                       text=resp.get("content") or "", tools=[tc["name"] for tc in resp["tool_calls"]])
 
         if not resp["tool_calls"]:
             final = resp["content"]
             events.record(ctx, "run_end", status="ok", rounds=round_num, final=final)
-            await memory.store(f"[{source}] User: {user_message}\nAssistant: {final}", source=source)
+            try:
+                await memory.store(f"[{source}] User: {user_message}\nAssistant: {final}",
+                                   source=source, kind="exchange")
+            except Exception as exc:
+                log.warning("Could not save this exchange to memory: %s", exc)
             return final
 
         messages.append({

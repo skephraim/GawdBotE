@@ -76,6 +76,20 @@ async def run() -> None:
     async def cmd_deny(ctx, request_id: str = ""):
         await _answer(ctx, request_id, False)
 
+    @bot.command(name="brain")
+    async def cmd_brain(ctx, *args):
+        if not _allowed(ctx.channel.id, ctx.author.id):
+            return
+        from core import brains
+        await ctx.send(brains.handle_command(list(args))[:1990])
+
+    @bot.command(name="usage")
+    async def cmd_usage(ctx, days: str = "30"):
+        if not _allowed(ctx.channel.id, ctx.author.id):
+            return
+        d = int(days) if days.isdigit() else 30
+        await ctx.send(events.format_usage(events.usage_summary(d), f"Usage, last {d} days:")[:1990])
+
     @bot.command(name="trace")
     async def cmd_trace(ctx, session_id: str = ""):
         if not _allowed(ctx.channel.id, ctx.author.id):
@@ -105,8 +119,8 @@ async def run() -> None:
         if not results:
             await ctx.send("No memories found.")
             return
-        lines = [f"[{r['score']:.2f}] {r['content'][:200]}" for r in results]
-        await ctx.send("\n\n".join(lines)[:2000])
+        text = memory.format_results(results)
+        await ctx.send(text[:2000])
 
     @bot.command(name="search")
     async def cmd_search(ctx, *, query: str = ""):

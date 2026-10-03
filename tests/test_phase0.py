@@ -269,7 +269,7 @@ def test_anthropic_response_arguments_are_real_json(monkeypatch):
             captured.update(params)
             return SimpleNamespace(content=[block_text, block_tool], stop_reason="tool_use")
 
-    monkeypatch.setattr(llm, "_anthropic_client", lambda: SimpleNamespace(messages=FakeMessages()))
+    monkeypatch.setattr(llm, "_anthropic_client", lambda *a, **k: SimpleNamespace(messages=FakeMessages()))
     result = asyncio.run(llm._call_anthropic(_conversation(), tools=[{"type": "function", "function": {"name": "git_status", "parameters": {"type": "object", "properties": {}}}}], system="sys"))
 
     args = json.loads(result["tool_calls"][0]["arguments"])        # the old code made this raise

@@ -1,10 +1,10 @@
 """
-Vision LLM — analyze screenshots from phone or desktop.
-Uses the first available vision-capable provider.
+Vision: describe a screenshot or image with the first working brain in the vision chain.
+Works with OpenAI compatible vision models and with Anthropic models.
 """
 from __future__ import annotations
-import config
-from core.llm import get_vision_client
+
+from core import llm
 
 
 async def analyze_image(
@@ -13,26 +13,8 @@ async def analyze_image(
     screen_width: int = None,
     screen_height: int = None,
 ) -> str:
-    """Analyze a base64-encoded image and return a description."""
-    client, model = await get_vision_client()
-
-    context = question
+    """Analyze a base64 encoded PNG (raw or data: URL) and return a description."""
+    prompt = question
     if screen_width and screen_height:
-        context = f"Screen size: {screen_width}x{screen_height}px. {question}"
-
-    img_data = image_base64
-    if "," in image_base64:
-        img_data = image_base64.split(",", 1)[1]
-
-    response = await client.chat.completions.create(
-        model=model,
-        messages=[{
-            "role": "user",
-            "content": [
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_data}"}},
-                {"type": "text", "text": context},
-            ],
-        }],
-        max_tokens=1024,
-    )
-    return response.choices[0].message.content
+        prompt = f"Screen size: {screen_width}x{screen_height}px. {question}"
+    return await llm.describe_image(image_base64, prompt)

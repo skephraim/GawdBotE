@@ -1,0 +1,75 @@
+# GawdBot brains. Copy this file to brains.toml and edit it.
+# While brains.toml does not exist, GawdBot uses the provider settings in .env instead.
+# Edits take effect on the next message; no restart needed.
+#
+# api_key is the NAME of a secret, never the key itself. Store the real key once with:
+#   python main.py secrets set ANTHROPIC_API_KEY
+#
+# Prices are USD per MILLION tokens. They are left blank on purpose: prices change, and a
+# made up number would put fake costs in your logs and in Paperclip's budgets. Copy the
+# current numbers from each provider's pricing page. Blank means "cost unknown".
+#
+# Check `python main.py brain` to see which brains are ready, and
+# `python main.py brain test` to send a tiny prompt down the main chain.
+
+[chains]
+main      = ["claude", "openrouter", "local"]     # tried in this order; /brain use <name> moves one to the front
+vision    = ["claude", "local-vision"]
+embedding = ["openai-embed", "local-embed"]       # vectors for memory search; keyword search works without any
+
+# ── Anthropic ──────────────────────────────────────────────────────────────────
+[brains.claude]
+kind    = "anthropic"
+model   = "claude-sonnet-5-5"
+api_key = "ANTHROPIC_API_KEY"
+vision  = true
+# price_in  =
+# price_out =
+
+[brains.claude-max]
+kind    = "anthropic"
+model   = "claude-opus-5-5"
+api_key = "ANTHROPIC_API_KEY"
+vision  = true
+
+[brains.claude-fast]
+kind    = "anthropic"
+model   = "claude-haiku-4-5-20251001"
+api_key = "ANTHROPIC_API_KEY"
+vision  = true
+
+# ── Any OpenAI compatible API (OpenAI, OpenRouter, NVIDIA NIM, Groq, xAI...) ───
+[brains.openrouter]
+kind     = "openai_compat"
+base_url = "https://openrouter.ai/api/v1"
+model    = "meta-llama/llama-3.3-70b-instruct"    # any model id OpenRouter lists
+api_key  = "OPENROUTER_API_KEY"
+
+[brains.openai-embed]
+kind     = "openai_compat"
+base_url = "https://api.openai.com/v1"
+model    = "text-embedding-3-small"
+api_key  = "OPENAI_API_KEY"
+tools    = false
+
+# ── Fully local with Ollama: nothing leaves your machine ───────────────────────
+[brains.local]
+kind     = "openai_compat"
+base_url = "http://localhost:11434/v1"
+model    = "llama3.3"
+no_key   = true
+
+[brains.local-vision]
+kind     = "openai_compat"
+base_url = "http://localhost:11434/v1"
+model    = "llava"
+no_key   = true
+tools    = false
+vision   = true
+
+[brains.local-embed]
+kind     = "openai_compat"
+base_url = "http://localhost:11434/v1"
+model    = "nomic-embed-text"
+no_key   = true
+tools    = false

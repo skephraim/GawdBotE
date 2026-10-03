@@ -73,6 +73,8 @@ async def run() -> None:
             "/search <query> — web search\n"
             "/approve <id> or /deny <id> — answer an approval request\n"
             "/trace — step by step log of the last run\n"
+            "/brain, /brain use <name>, /brain reset — see or switch the AI model\n"
+            "/usage [days] — tokens and cost per model\n"
             "Any message — chat with GawdBotE\n"
             "Voice message — transcribed and handled as text"
         )
@@ -91,6 +93,18 @@ async def run() -> None:
 
     async def cmd_deny(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await _answer(update, ctx, False)
+
+    async def cmd_brain(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not _authorized(update.effective_user.id):
+            return
+        from core import brains
+        await update.message.reply_text(brains.handle_command(list(ctx.args))[:4000])
+
+    async def cmd_usage(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not _authorized(update.effective_user.id):
+            return
+        days = int(ctx.args[0]) if ctx.args and ctx.args[0].isdigit() else 30
+        await update.message.reply_text(events.format_usage(events.usage_summary(days), f"Usage, last {days} days:")[:4000])
 
     async def cmd_trace(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not _authorized(update.effective_user.id):
@@ -120,8 +134,8 @@ async def run() -> None:
         if not results:
             await update.message.reply_text("No memories found.")
             return
-        lines = [f"[{r['score']:.2f}] {r['content'][:200]}" for r in results]
-        await update.message.reply_text("\n\n".join(lines)[:4000])
+        text = memory.format_results(results)
+        await update.message.reply_text(text[:4000])
 
     async def cmd_search(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not _authorized(update.effective_user.id):
@@ -179,6 +193,8 @@ async def run() -> None:
     app.add_handler(CommandHandler("approve", cmd_approve))
     app.add_handler(CommandHandler("deny", cmd_deny))
     app.add_handler(CommandHandler("trace", cmd_trace))
+    app.add_handler(CommandHandler("brain", cmd_brain))
+    app.add_handler(CommandHandler("usage", cmd_usage))
     app.add_handler(CommandHandler("evolve", cmd_evolve))
     app.add_handler(CommandHandler("memory", cmd_memory))
     app.add_handler(CommandHandler("search", cmd_search))
