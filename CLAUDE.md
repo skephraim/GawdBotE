@@ -125,3 +125,7 @@ gawdbote/
 - Graph links are EXTRACTED only when both names appear in the supporting memory text. Never
   mark a link EXTRACTED by assertion, and never let new evidence lower a confidence label.
 - Graph expansion must never walk through hub entities unless the question names them.
+- Saved memories reach the LLM ONLY as `private_context` to `llm.chat()`, never pasted into the
+  system prompt. Brains marked `shares_data` (free tiers, docs/FREE_TIER_ROUTER.md) never receive
+  them and never embed them unless the owner set MEMORY_TO_SHARED_BRAINS=true.
+- Never set `shares_data = false` on a provider whose free terms allow training or human review.

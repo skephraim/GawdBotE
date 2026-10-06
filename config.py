@@ -100,6 +100,9 @@ MEMORY_EXCHANGE_DAYS = int(os.getenv("MEMORY_EXCHANGE_DAYS", "90"))
 # Embedding every chat exchange costs an API call per message. Off by default: exchanges are
 # still found by keyword search. Saved facts are always embedded when an embedder is available.
 MEMORY_EMBED_EXCHANGES = os.getenv("MEMORY_EMBED_EXCHANGES", "false").lower() == "true"
+# Brains marked shares_data (most free tiers: the provider may train on prompts or let people
+# read them) never see your saved memories and never embed them. Set true only if you accept that.
+MEMORY_TO_SHARED_BRAINS = os.getenv("MEMORY_TO_SHARED_BRAINS", "false").lower() == "true"
 
 # ── Interfaces ─────────────────────────────────────────────────────────────────
 # SECURITY: every chat interface gives the sender the power to run the agent, which
