@@ -35,6 +35,14 @@ down every message, like downtime procedures for a system that's confirmed down.
 
 The choice survives restarts. Editing `brains.toml` takes effect on the next message.
 
+### Free brains and your privacy
+
+Mark any brain whose provider may train on your prompts or let people read them with
+`shares_data = true` (most free tiers, including the FreeLLMAPI router). That brain never
+receives your saved memories and is never used to embed them, even when the chain falls back
+to it. Your message and this run's tool results still go to it, so keep it for low stakes
+work. Setup and the full picture: [FREE_TIER_ROUTER.md](FREE_TIER_ROUTER.md).
+
 ### What it costs
 
 `/usage` in chat, or `python main.py usage 30`, shows calls, tokens and cost per brain.

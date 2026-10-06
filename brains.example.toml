@@ -73,3 +73,22 @@ base_url = "http://localhost:11434/v1"
 model    = "nomic-embed-text"
 no_key   = true
 tools    = false
+
+# ── Qwen (Alibaba Model Studio). Copy base_url from your own console: the US region is
+#    shown here; Singapore and Tokyo use a URL with your workspace id in it. ───────────────
+# [brains.qwen]
+# kind     = "openai_compat"
+# base_url = "https://dashscope-us.aliyuncs.com/compatible-mode/v1"
+# model    = "qwen-plus"
+# api_key  = "QWEN_API_KEY"
+
+# ── FreeLLMAPI: one local router over many FREE tiers (see docs/FREE_TIER_ROUTER.md) ──────
+# Free tiers may train on your prompts or let people read them, so this brain is marked as
+# sharing data. GawdBot then never sends it your saved memories and never embeds with it.
+# Good as the LAST brain in a chain: free backup when the paid brains are down or out of credit.
+# [brains.free]
+# kind        = "openai_compat"
+# base_url    = "http://localhost:3001/v1"
+# model       = "auto"                  # or "auto:fast" / "auto:smart"
+# api_key     = "FREELLMAPI_KEY"
+# shares_data = true

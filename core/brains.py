@@ -17,6 +17,11 @@ Swapping live: `/brain use claude` in Telegram, Discord or the CLI chat moves th
 the front of the main chain. The choice is saved in data/brain_state.json and survives
 restarts. brains.toml is re read whenever it changes, so edits apply without a restart.
 
+PRIVACY: mark a brain `shares_data = true` when its provider may train on your prompts or
+let people read them (most free tiers say so in their terms). Such a brain still answers,
+but your saved memories are never put in front of it, and it is never used to embed them
+unless MEMORY_TO_SHARED_BRAINS=true.
+
 SECURITY: brains.toml holds the NAME of a secret (api_key = "ANTHROPIC_API_KEY"), never the
 key itself. The key is fetched from the OS vault or .env at the moment of the call. A value
 that looks like a real key is rejected so it never ends up in a file you might share.
@@ -59,6 +64,8 @@ class Brain:
     price_out: Optional[float] = None       # USD per million output tokens
     max_tokens: int = 4096
     embed_input_type: bool = False          # NVIDIA style embeddings want input_type=query|passage
+    shares_data: bool = False               # the provider may train on prompts or let humans read them
+                                            # (most FREE tiers). Your saved memories are never sent to it.
 
     @property
     def label(self) -> str:
@@ -268,6 +275,8 @@ def describe() -> str:
                 tags.append("chosen")
             if b.price_in is None:
                 tags.append("price unknown")
+            if b.shares_data:
+                tags.append("shares your data: memories withheld")
             status = "ready" if ok else f"skipped: {why}"
             lines.append(f"  {i}. {b.label} [{status}]" + (f" ({', '.join(tags)})" if tags else ""))
     lines.append("\nSwitch with: /brain use <name>   Undo with: /brain reset")

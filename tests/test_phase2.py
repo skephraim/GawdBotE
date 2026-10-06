@@ -525,7 +525,8 @@ def scripted(monkeypatch):
         script = list(replies)
 
         async def chat(messages, tools=None, system="", **k):
-            systems.append(system)
+            # What a PRIVATE brain receives: the system prompt plus the private context.
+            systems.append(system + k.get("private_context", ""))
             return script.pop(0)
 
         monkeypatch.setattr(agent.llm, "chat", chat)

@@ -22,6 +22,7 @@ import logging
 import time
 from typing import Optional
 
+import config
 from core import brains as brains_mod
 from core.brains import Brain
 
@@ -79,6 +80,13 @@ def _usage(tokens_in, tokens_out, cached=0) -> dict:
 
 # ── OpenAI compatible adapter (OpenAI, OpenRouter, NVIDIA NIM, Ollama, Groq, ...) ─
 
+def _served_model(resp, brain) -> str:
+    """The model that actually answered. Routers (OpenRouter, FreeLLMAPI) choose it per request
+    and say which in the response; anything missing or odd falls back to the configured name."""
+    served = getattr(resp, "model", None)
+    return served if isinstance(served, str) and served.strip() else brain.model
+
+
 async def _call_openai_compat(brain: Brain, messages: list[dict], tools: Optional[list] = None, system: str = "") -> dict:
     msgs = messages
     if system and (not msgs or msgs[0].get("role") != "system"):
@@ -99,6 +107,8 @@ async def _call_openai_compat(brain: Brain, messages: list[dict], tools: Optiona
         ],
         "finish_reason": choice.finish_reason,
         "usage": _usage(getattr(u, "prompt_tokens", 0), getattr(u, "completion_tokens", 0), cached),
+        # Routers (OpenRouter, FreeLLMAPI) pick the real model per request; the response says which.
+        "served_model": _served_model(resp, brain),
     }
 
 
@@ -192,6 +202,7 @@ async def _call_anthropic(messages: list[dict], tools: Optional[list] = None, sy
         "finish_reason": resp.stop_reason,
         "usage": _usage(getattr(u, "input_tokens", 0), getattr(u, "output_tokens", 0),
                         getattr(u, "cache_read_input_tokens", 0)),
+        "served_model": _served_model(resp, brain),
     }
 
 
@@ -203,10 +214,15 @@ async def _call(brain: Brain, messages, tools, system) -> dict:
     return await _call_openai_compat(brain, messages, tools=tools, system=system)
 
 
-async def chat(messages: list[dict], tools: Optional[list] = None, system: str = "", chain: str = "main", **_) -> dict:
+async def chat(messages: list[dict], tools: Optional[list] = None, system: str = "", chain: str = "main",
+               private_context: str = "", **_) -> dict:
     """
     Send a chat request down the brain chain until one answers.
     Raises RuntimeError listing every brain's problem if none can.
+
+    private_context: text for the system prompt that only brains which keep your data private
+    may see (your saved memories). A `shares_data` brain gets the system prompt WITHOUT it. This
+    is decided per brain, so a fallback from a private brain to a free tier one still withholds it.
     """
     problems: list[str] = []
     for brain in _in_order(brains_mod.chain(chain)):
@@ -217,8 +233,10 @@ async def chat(messages: list[dict], tools: Optional[list] = None, system: str =
         if not ok:
             problems.append(f"{brain.name}: skipped, {why}")
             continue
+        withheld = bool(private_context) and brain.shares_data and not config.MEMORY_TO_SHARED_BRAINS
+        brain_system = system if (withheld or not private_context) else system + private_context
         try:
-            resp = await _call(brain, messages, tools, system)
+            resp = await _call(brain, messages, tools, brain_system)
         except Exception as exc:
             msg = f"{brain.name}: {type(exc).__name__}: {exc}"
             log.warning("Brain failed, trying the next one. %s", msg[:300])
@@ -227,8 +245,10 @@ async def chat(messages: list[dict], tools: Optional[list] = None, system: str =
             continue
         _mark_up(brain)
         u = resp.get("usage") or _usage(0, 0)
+        resp.setdefault("served_model", brain.model)
         resp.update(provider=brain.name, brain=brain.name, model=brain.model, provider_name=brain.provider,
-                    fallbacks=problems, cost_usd=brain.cost_usd(u["input_tokens"], u["output_tokens"]))
+                    fallbacks=problems, cost_usd=brain.cost_usd(u["input_tokens"], u["output_tokens"]),
+                    shares_data=brain.shares_data, memory_withheld=withheld)
         return resp
     detail = "\n".join(problems) or f"no brains are configured for the {chain} chain"
     raise RuntimeError(f"All LLM providers failed:\n{detail}")
@@ -276,12 +296,18 @@ async def embed(texts: list[str], purpose: str = "passage") -> Optional[tuple[li
         ok, _ = brain.available()
         if not ok or _cooling(brain):
             continue
+        # Embedding a memory means sending its full text. Never to a provider that may
+        # train on it, unless the owner explicitly allowed that.
+        if brain.shares_data and not config.MEMORY_TO_SHARED_BRAINS:
+            continue
         try:
             extra = {"encoding_format": "float", "extra_body": {"input_type": purpose}} if brain.embed_input_type else {}
             client = _openai_client(brain, timeout=EMBED_TIMEOUT_SECONDS, retries=0)
             resp = await client.embeddings.create(model=brain.model, input=texts, **extra)
             _mark_up(brain)
-            return [d.embedding for d in resp.data], f"{brain.name}:{brain.model}"
+            # Tag vectors with the model that ACTUALLY made them. A router may let you change
+            # its default embedding model; trusting the config name would mix vector spaces.
+            return [d.embedding for d in resp.data], f"{brain.name}:{_served_model(resp, brain)}"
         except Exception as exc:
             _mark_down(brain)
             log.warning("Embedding brain %s failed, pausing it for %ss: %s", brain.name, BRAIN_COOLDOWN_SECONDS, exc)

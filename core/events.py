@@ -159,7 +159,7 @@ def recent_sessions(limit: int = 10, channel: Optional[str] = None) -> list[dict
 
 _USAGE_COLUMNS = """
     COALESCE(json_extract(detail, '$.brain'), json_extract(detail, '$.provider'), '?') AS brain,
-    COALESCE(json_extract(detail, '$.model'), '?')                                   AS model,
+    COALESCE(json_extract(detail, '$.served_model'), json_extract(detail, '$.model'), '?') AS model,
     COALESCE(json_extract(detail, '$.provider_name'), '?')                           AS provider,
     COUNT(*)                                                                         AS calls,
     SUM(COALESCE(json_extract(detail, '$.input_tokens'), 0))                         AS input_tokens,
@@ -257,6 +257,11 @@ def format_session(session_id: str, max_chars: int = 3_500) -> str:
             for problem in d.get("fallbacks") or []:
                 lines.append(f"{t} brain fallback: {_flat(problem, 160)}")
             who = d.get("brain") or d.get("provider", "?")
+            served = d.get("served_model")
+            if served and served != d.get("model"):
+                who += f" via {served}"          # a router picked the real model; show which
+            if d.get("memory_withheld"):
+                lines.append(f"{t} memory withheld: {d.get('brain')} may share data with its provider")
             lines.append(f"{t} brain ({who}) round {d.get('round')}{spend}: wants {wants}" + (f". Said: {said}" if said else ""))
         elif k == "heartbeat":
             extra = d.get("title") or d.get("reason") or d.get("error") or d.get("issue_id") or ""

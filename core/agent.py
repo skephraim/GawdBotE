@@ -128,7 +128,10 @@ async def run(
         log.warning("Memory recall failed: %s", exc)
         recalled = []
 
-    effective_system = SYSTEM_PROMPT + (skill_context or "") + memory.format_for_prompt(recalled)
+    effective_system = SYSTEM_PROMPT + (skill_context or "")
+    # Saved memories travel separately so the LLM layer can withhold them, per brain, from any
+    # provider that may train on prompts (brains marked shares_data, usually free tiers).
+    private_context = memory.format_for_prompt(recalled)
     events.record(ctx, "run_start", message=user_message, source=source,
                   skills=[s.name for s in skills_mod.find_relevant(user_message)] if skill_context else [],
                   recalled=[r["id"] for r in recalled])
@@ -136,7 +139,7 @@ async def run(
     specs = tool_specs()
     for round_num in range(1, max_rounds + 1):
         try:
-            resp = await llm.chat(messages, tools=specs, system=effective_system)
+            resp = await llm.chat(messages, tools=specs, system=effective_system, private_context=private_context)
         except Exception as exc:
             events.record(ctx, "run_end", status="error", rounds=round_num, final=f"LLM failure: {exc}")
             raise
@@ -144,6 +147,7 @@ async def run(
         usage = resp.get("usage") or {}
         events.record(ctx, "llm_reply", provider=resp.get("provider"), round=round_num,
                       brain=resp.get("brain"), model=resp.get("model"), provider_name=resp.get("provider_name"),
+                      served_model=resp.get("served_model"), memory_withheld=bool(resp.get("memory_withheld")),
                       input_tokens=usage.get("input_tokens", 0), output_tokens=usage.get("output_tokens", 0),
                       cached_input_tokens=usage.get("cached_input_tokens", 0), cost_usd=resp.get("cost_usd"),
                       fallbacks=resp.get("fallbacks") or [],
